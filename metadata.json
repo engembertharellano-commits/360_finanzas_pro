@@ -1,0 +1,7 @@
+{
+  "name": "360 finanza 2",
+  "description": "A world-class personal finance manager with AI-driven insights, budgeting tools, and visual spending analytics powered by Gemini.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
