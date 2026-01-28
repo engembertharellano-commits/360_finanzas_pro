@@ -6,9 +6,7 @@ import {
 import { 
   BankAccount, Transaction, Investment, Budget, User, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_INCOME_CATEGORIES
 } from './types';
-import { supabase } from './lib/supabase'; // <--- EL PUENTE CON SUPABASE
-
-// Importación de tus componentes (esto se queda igual)
+import { supabase } from './lib/supabase';
 import { Dashboard } from './components/Dashboard';
 import { AccountsList } from './components/AccountsList';
 import { TransactionsLog } from './components/TransactionsLog';
@@ -26,7 +24,6 @@ import { FinanceAIService } from './services/geminiService';
 type View = 'dashboard' | 'accounts' | 'transactions' | 'portfolio' | 'budget' | 'ai' | 'settings' | 'work' | 'custody';
 
 const App: React.FC = () => {
-  // --- ESTADO Y VARIABLES ---
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeView, setActiveView] = useState<View>('dashboard');
@@ -39,180 +36,130 @@ const App: React.FC = () => {
   const [exchangeRate, setExchangeRate] = useState<number>(45.50);
   const [rateSourceUrl, setRateSourceUrl] = useState<string | undefined>(undefined);
   const [isSyncingRate, setIsSyncingRate] = useState(false);
-  
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
+  
   const [expenseCategories, setExpenseCategories] = useState<string[]>(DEFAULT_EXPENSE_CATEGORIES);
   const [incomeCategories, setIncomeCategories] = useState<string[]>(DEFAULT_INCOME_CATEGORIES);
 
-  const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false, title: '', message: '', onConfirm: () => {}
+  });
 
-  // --- LÓGICA DE DATOS (CONEXIÓN A SUPABASE) ---
-
+  // CARGAR DATOS DE SUPABASE
   const fetchData = useCallback(async (userId: string) => {
     setLoading(true);
-    try {
-      // Pedimos a Supabase toda la información
-      const [accs, trans, invs, buds] = await Promise.all([
-        supabase.from('accounts').select('*').eq('user_id', userId),
-        supabase.from('transactions').select('*').eq('user_id', userId).order('date', { ascending: false }),
-        supabase.from('investments').select('*').eq('user_id', userId),
-        supabase.from('budgets').select('*').eq('user_id', userId)
-      ]);
+    const [accs, trans, invs, buds] = await Promise.all([
+      supabase.from('accounts').select('*').eq('user_id', userId),
+      supabase.from('transactions').select('*').eq('user_id', userId).order('date', { ascending: false }),
+      supabase.from('investments').select('*').eq('user_id', userId),
+      supabase.from('budgets').select('*').eq('user_id', userId)
+    ]);
 
-      if (accs.data) setAccounts(accs.data);
-      if (trans.data) setTransactions(trans.data);
-      if (invs.data) setInvestments(invs.data);
-      if (buds.data) setBudgets(buds.data);
-    } catch (error) {
-      console.error("Error cargando datos:", error);
-    } finally {
-      setLoading(false);
-    }
+    if (accs.data) setAccounts(accs.data);
+    if (trans.data) setTransactions(trans.data);
+    if (invs.data) setInvestments(invs.data);
+    if (buds.data) setBudgets(buds.data);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
-    // Verificar si hay una sesión activa al abrir la app
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        setCurrentUser({
-          id: session.user.id,
-          name: session.user.user_metadata.name || session.user.email!,
-          email: session.user.email!
-        });
+        setCurrentUser({ id: session.user.id, name: session.user.user_metadata.name || 'Usuario', email: session.user.email! });
         fetchData(session.user.id);
-      } else {
-        setLoading(false);
-      }
+      } else { setLoading(false); }
     });
-
-    // Escuchar si el usuario inicia o cierra sesión
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        setCurrentUser({
-          id: session.user.id,
-          name: session.user.user_metadata.name || session.user.email!,
-          email: session.user.email!
-        });
-        fetchData(session.user.id);
-      } else {
-        setCurrentUser(null);
-      }
-    });
-
-    return () => subscription.unsubscribe();
   }, [fetchData]);
 
-  // --- FUNCIONES DE ACCIÓN (Añadir, Borrar, etc.) ---
-  
+  // FUNCIONES DE ACCIÓN
   const handleAddTransaction = async (tData: Omit<Transaction, 'id'>) => {
     if (!currentUser) return;
-    const { data, error } = await supabase
-      .from('transactions')
-      .insert([{ ...tData, user_id: currentUser.id }])
-      .select().single();
-
+    const { data } = await supabase.from('transactions').insert([{ ...tData, user_id: currentUser.id }]).select().single();
     if (data) setTransactions(prev => [data, ...prev]);
   };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setCurrentUser(null);
-    setActiveView('dashboard');
   };
 
-  // --- TODO TU DISEÑO ORIGINAL (JSX) ---
+  const changeMonth = (offset: number) => {
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const d = new Date(year, month - 1 + offset, 1);
+    setSelectedMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center font-sans">Cargando Finanza360...</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center">Cargando...</div>;
   if (!currentUser) return <Auth onSelectUser={() => {}} />;
 
   const formattedMonth = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(new Date(selectedMonth + '-01'));
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 text-slate-900 animate-in fade-in duration-500 overflow-x-hidden font-sans">
+    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 text-slate-900 font-sans">
       <ConfirmationModal 
-        isOpen={confirmModal.isOpen}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        onConfirm={confirmModal.onConfirm}
-        onClose={() => setConfirmModal(prev => ({...prev, isOpen: false}))}
+        isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message}
+        onConfirm={confirmModal.onConfirm} onClose={() => setConfirmModal(prev => ({...prev, isOpen: false}))}
       />
 
-      {/* Header móvil */}
-      <div className="md:hidden bg-white border-b px-6 py-5 flex items-center justify-between sticky top-0 z-[60] shadow-sm">
+      {/* Menú Móvil */}
+      <div className="md:hidden bg-white border-b px-6 py-5 flex items-center justify-between sticky top-0 z-[60]">
         <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 bg-slate-900 rounded-xl flex items-center justify-center shadow-lg">
-            <Sparkles className="text-white w-5 h-5" />
-          </div>
-          <span className="text-xl font-black tracking-tighter">Finanza360</span>
+          <Sparkles className="text-slate-900 w-6 h-6" />
+          <span className="font-black">Finanza360</span>
         </div>
-        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 text-slate-600 hover:bg-slate-50 rounded-xl transition-colors">
-          {isMobileMenuOpen ? <X size={26} /> : <Menu size={26} />}
-        </button>
+        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}><Menu /></button>
       </div>
 
-      {/* Sidebar / Menú Lateral */}
-      <aside className={`fixed inset-0 z-50 transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 md:block md:w-80 md:min-h-screen ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="bg-white border-r h-full flex flex-col p-8 shadow-2xl md:shadow-none">
-          <div className="hidden md:flex items-center space-x-3 mb-12">
-            <div className="w-11 h-11 bg-slate-900 rounded-[1.2rem] flex items-center justify-center shadow-2xl">
-              <Sparkles className="text-white w-6 h-6" />
+      {/* Sidebar */}
+      <aside className={`fixed inset-0 z-50 md:relative md:translate-x-0 md:w-80 bg-white border-r transition-transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-8 flex flex-col h-full">
+          <div className="mb-10 p-5 bg-slate-50 rounded-2xl flex items-center space-x-4">
+            <div className="w-10 h-10 bg-slate-900 text-white rounded-lg flex items-center justify-center font-bold">
+              {currentUser.name.charAt(0)}
             </div>
-            <span className="text-2xl font-black tracking-tighter">Finanza360</span>
+            <div className="overflow-hidden">
+              <p className="text-sm font-bold truncate">{currentUser.name}</p>
+              <p className="text-[10px] text-slate-400 truncate">{currentUser.email}</p>
+            </div>
           </div>
 
-          <div className="mb-10 p-5 bg-slate-50 rounded-[2rem] border border-slate-100 flex items-center space-x-4">
-             <div className="w-12 h-12 bg-white border-2 border-slate-200 rounded-2xl flex items-center justify-center text-slate-400 font-black shadow-sm">
-                {currentUser.name.charAt(0).toUpperCase()}
-             </div>
-             <div className="min-w-0">
-                <p className="text-sm font-black truncate text-slate-900">{currentUser.name}</p>
-                <p className="text-[10px] font-bold text-slate-400 truncate uppercase tracking-widest">{currentUser.email}</p>
-             </div>
-          </div>
-
-          <nav className="space-y-2 flex-1 overflow-y-auto custom-scrollbar">
-            <NavItem active={activeView === 'dashboard'} onClick={() => { setActiveView('dashboard'); setIsMobileMenuOpen(false); }} icon={<LayoutDashboard size={20}/>} label="Dashboard Principal" />
-            <NavItem active={activeView === 'ai'} onClick={() => { setActiveView('ai'); setIsMobileMenuOpen(false); }} icon={<Sparkles size={20}/>} label="Análisis Inteligente" isSpecial={true} />
-            <div className="h-px bg-slate-100 my-4 mx-2"></div>
-            <NavItem active={activeView === 'accounts'} onClick={() => { setActiveView('accounts'); setIsMobileMenuOpen(false); }} icon={<CreditCard size={20}/>} label="Bancos y Efectivo" />
-            <NavItem active={activeView === 'transactions'} onClick={() => { setActiveView('transactions'); setIsMobileMenuOpen(false); }} icon={<Wallet size={20}/>} label="Historial Movimientos" />
-            <NavItem active={activeView === 'portfolio'} onClick={() => { setActiveView('portfolio'); setIsMobileMenuOpen(false); }} icon={<TrendingUp size={20}/>} label="Mi Portafolio" />
-            <div className="h-px bg-slate-100 my-4 mx-2"></div>
-            <NavItem active={activeView === 'work'} onClick={() => { setActiveView('work'); setIsMobileMenuOpen(false); }} icon={<Briefcase size={20}/>} label="Pote Trabajo" />
-            <NavItem active={activeView === 'custody'} onClick={() => { setActiveView('custody'); setIsMobileMenuOpen(false); }} icon={<Users size={20}/>} label="Custodia Terceros" />
-            <NavItem active={activeView === 'budget'} onClick={() => { setActiveView('budget'); setIsMobileMenuOpen(false); }} icon={<PieChart size={20}/>} label="Límites Gastos" />
-            <NavItem active={activeView === 'settings'} onClick={() => { setActiveView('settings'); setIsMobileMenuOpen(false); }} icon={<Settings2 size={20}/>} label="Ajustes" />
+          <nav className="space-y-1 flex-1">
+            <NavItem active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} icon={<LayoutDashboard size={18}/>} label="Dashboard" />
+            <NavItem active={activeView === 'accounts'} onClick={() => setActiveView('accounts')} icon={<CreditCard size={18}/>} label="Bancos" />
+            <NavItem active={activeView === 'transactions'} onClick={() => setActiveView('transactions')} icon={<Wallet size={18}/>} label="Movimientos" />
+            <NavItem active={activeView === 'portfolio'} onClick={() => setActiveView('portfolio')} icon={<TrendingUp size={18}/>} label="Portafolio" />
+            <NavItem active={activeView === 'work'} onClick={() => setActiveView('work')} icon={<Briefcase size={18}/>} label="Trabajo" />
+            <NavItem active={activeView === 'budget'} onClick={() => setActiveView('budget')} icon={<PieChart size={18}/>} label="Presupuestos" />
           </nav>
 
-          <div className="mt-8 pt-6 border-t border-slate-50">
-            <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 py-3 text-[10px] font-black text-slate-300 hover:text-rose-500 uppercase tracking-widest transition-colors">
-              <LogOut size={14} /> Cerrar Sesión
-            </button>
-          </div>
+          <button onClick={handleLogout} className="mt-auto flex items-center gap-2 text-slate-400 text-xs font-bold hover:text-red-500">
+            <LogOut size={14}/> CERRAR SESIÓN
+          </button>
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto px-6 py-8 md:p-14 view-container">
-        <div className="max-w-7xl mx-auto space-y-12">
+      {/* Contenido */}
+      <main className="flex-1 p-6 md:p-12 overflow-y-auto">
+        <div className="max-w-6xl mx-auto">
           {activeView === 'dashboard' && <Dashboard accounts={accounts} transactions={transactions} investments={investments} budgets={budgets} selectedMonth={selectedMonth} exchangeRate={exchangeRate} onSyncRate={() => {}} isSyncingRate={false} />}
-          {/* Aquí irían los otros condicionales de vista que tenías, se mantienen igual */}
           {activeView === 'accounts' && <AccountsList accounts={accounts} onAdd={() => {}} onDelete={() => {}} />}
+          {activeView === 'transactions' && <TransactionsLog transactions={transactions} accounts={accounts} onAdd={handleAddTransaction} onDelete={() => {}} selectedMonth={selectedMonth} exchangeRate={exchangeRate} expenseCategories={expenseCategories} incomeCategories={incomeCategories} />}
+          {activeView === 'portfolio' && <Portfolio investments={investments} accounts={accounts} onAdd={() => {}} onUpdate={() => {}} onDelete={() => {}} onAddTransaction={handleAddTransaction} exchangeRate={exchangeRate} />}
+          {activeView === 'work' && <WorkManagement transactions={transactions} onUpdateTransaction={() => {}} exchangeRate={exchangeRate} />}
+          {activeView === 'budget' && <BudgetView budgets={budgets} transactions={transactions} onAdd={() => {}} onDelete={() => {}} exchangeRate={exchangeRate} selectedMonth={selectedMonth} expenseCategories={expenseCategories} />}
         </div>
       </main>
-
-      {isMobileMenuOpen && <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-40 md:hidden animate-in fade-in" onClick={() => setIsMobileMenuOpen(false)}></div>}
+      <AIChat transactions={transactions} accounts={accounts} />
     </div>
   );
 };
 
-// Componente NavItem (Auxiliar)
-const NavItem = ({ active, onClick, icon, label, isSpecial }: any) => (
-  <button onClick={onClick} className={`flex items-center space-x-4 w-full p-4 rounded-2xl transition-all duration-300 group ${active ? (isSpecial ? 'bg-indigo-600 text-white shadow-xl font-bold scale-[1.02]' : 'bg-slate-900 text-white shadow-xl font-bold scale-[1.02]') : (isSpecial ? 'text-indigo-500 hover:bg-indigo-50 font-bold' : 'text-slate-500 hover:bg-slate-50')}`}>
-    <span className={`${active ? 'scale-110' : 'opacity-70 group-hover:scale-110'} transition-transform`}>{icon}</span>
-    <span className="text-sm tracking-tight">{label}</span>
+const NavItem = ({ active, onClick, icon, label }: any) => (
+  <button onClick={onClick} className={`w-full flex items-center space-x-3 p-3 rounded-xl text-sm transition-all ${active ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}>
+    {icon} <span>{label}</span>
   </button>
 );
 
