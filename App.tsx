@@ -8,7 +8,7 @@ import {
 } from './types';
 import { supabase } from './lib/supabase';
 
-// --- IMPORTACIÓN DE TODOS TUS COMPONENTES ---
+// Componentes
 import { Dashboard } from './components/Dashboard';
 import { AccountsList } from './components/AccountsList';
 import { TransactionsLog } from './components/TransactionsLog';
@@ -22,10 +22,7 @@ import { WorkManagement } from './components/WorkManagement';
 import { CustodyManagement } from './components/CustodyManagement';
 import { Auth } from './components/Auth';
 
-type View = 'dashboard' | 'accounts' | 'transactions' | 'portfolio' | 'budget' | 'ai' | 'settings' | 'work' | 'custody';
-
 const App: React.FC = () => {
-  // --- ESTADOS DE DATOS ---
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeView, setActiveView] = useState<View>('dashboard');
@@ -40,11 +37,8 @@ const App: React.FC = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
-  
-  // Modal de confirmación con diseño
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
 
-  // --- CARGA INTEGRAL DESDE LA NUBE ---
   const loadAppData = useCallback(async (userId: string) => {
     setLoading(true);
     const [accs, trans, invs, buds] = await Promise.all([
@@ -53,7 +47,6 @@ const App: React.FC = () => {
       supabase.from('investments').select('*').eq('user_id', userId),
       supabase.from('budgets').select('*').eq('user_id', userId)
     ]);
-
     if (accs.data) setAccounts(accs.data);
     if (trans.data) setTransactions(trans.data);
     if (invs.data) setInvestments(invs.data);
@@ -71,13 +64,58 @@ const App: React.FC = () => {
     });
   }, [loadAppData]);
 
-  // --- MANEJADORES DE ACCIÓN (NUBE + MODAL) ---
+  // --- LÓGICA DE ACTUALIZACIÓN DE SALDOS ---
+
+  const handleAddTransaction = async (tData: any) => {
+    if (!currentUser) return;
+
+    // 1. Buscamos la cuenta afectada
+    const account = accounts.find(a => a.id === tData.accountId);
+    if (!account) return;
+
+    // 2. Calculamos el nuevo saldo localmente
+    let newBalance = Number(account.balance);
+    const amount = Number(tData.amount);
+    const commission = Number(tData.commission || 0);
+
+    if (tData.type === 'expense') newBalance -= (amount + commission);
+    if (tData.type === 'income') newBalance += (amount - commission);
+    
+    // 3. Si es transferencia, afectamos la cuenta destino también
+    let destAccount = null;
+    if (tData.type === 'transfer' && tData.toAccountId) {
+        newBalance -= (amount + commission);
+        destAccount = accounts.find(a => a.id === tData.toAccountId);
+    }
+
+    // 4. GUARDAR TODO EN SUPABASE (Transacción + Saldo actualizado)
+    const { data: newTx, error: txErr } = await supabase
+      .from('transactions')
+      .insert([{ ...tData, user_id: currentUser.id }])
+      .select().single();
+
+    if (txErr) {
+        alert("Error al guardar movimiento: " + txErr.message);
+        return;
+    }
+
+    // Actualizar saldo de cuenta origen
+    await supabase.from('accounts').update({ balance: newBalance }).eq('id', tData.accountId);
+
+    // Actualizar saldo de cuenta destino si es transferencia
+    if (destAccount) {
+        const newDestBalance = Number(destAccount.balance) + amount;
+        await supabase.from('accounts').update({ balance: newDestBalance }).eq('id', tData.toAccountId);
+    }
+
+    // 5. Refrescar la interfaz
+    loadAppData(currentUser.id);
+  };
 
   const handleAddAccount = async (acc: BankAccount) => {
     if (!currentUser) return;
     const { id, ...cleanData } = acc;
-    const { data, error } = await supabase.from('accounts').insert([{ ...cleanData, user_id: currentUser.id }]).select().single();
-    if (error) alert("Error: " + error.message);
+    const { data } = await supabase.from('accounts').insert([{ ...cleanData, user_id: currentUser.id }]).select().single();
     if (data) setAccounts(prev => [...prev, data]);
   };
 
@@ -85,23 +123,13 @@ const App: React.FC = () => {
     setConfirmModal({
       isOpen: true,
       title: '¿Eliminar cuenta?',
-      message: 'Esta acción borrará permanentemente la cuenta y todos sus movimientos.',
+      message: 'Se borrarán todos los saldos y movimientos de esta cuenta.',
       onConfirm: async () => {
         await supabase.from('accounts').delete().eq('id', id);
-        setAccounts(prev => prev.filter(a => a.id !== id));
+        loadAppData(currentUser!.id);
         setConfirmModal(prev => ({ ...prev, isOpen: false }));
       }
     });
-  };
-
-  const handleAddTransaction = async (tData: Omit<Transaction, 'id'>) => {
-    if (!currentUser) return;
-    const { data, error } = await supabase.from('transactions').insert([{ ...tData, user_id: currentUser.id }]).select().single();
-    if (error) alert("Error en movimiento: " + error.message);
-    if (data) {
-        setTransactions(prev => [data, ...prev]);
-        loadAppData(currentUser.id); 
-    }
   };
 
   const handleLogout = async () => {
@@ -109,27 +137,23 @@ const App: React.FC = () => {
     setCurrentUser(null);
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center font-black text-slate-400 italic">CARGANDO ECOSISTEMA...</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center font-black text-slate-400 italic">ACTUALIZANDO SALDOS...</div>;
   if (!currentUser) return <Auth onSelectUser={() => {}} />;
 
-  const formattedMonth = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(new Date(selectedMonth + '-01'));
-
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 text-slate-900 font-sans">
+    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 text-slate-900 font-sans overflow-x-hidden">
       <ConfirmationModal 
         isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message}
         onConfirm={confirmModal.onConfirm} onClose={() => setConfirmModal(prev => ({...prev, isOpen: false}))}
       />
 
-      {/* Navegación Lateral Completa */}
       <aside className={`fixed inset-0 z-50 md:relative md:translate-x-0 md:w-80 bg-white border-r transition-transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="h-full flex flex-col p-8">
           <div className="flex items-center space-x-3 mb-10">
             <Sparkles className="text-slate-900 w-8 h-8" />
             <span className="text-2xl font-black tracking-tighter">Finanza360</span>
           </div>
-
-          <nav className="space-y-1 flex-1 overflow-y-auto custom-scrollbar">
+          <nav className="space-y-1 flex-1 overflow-y-auto">
             <NavItem active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} icon={<LayoutDashboard size={20}/>} label="Principal" />
             <NavItem active={activeView === 'ai'} onClick={() => setActiveView('ai')} icon={<Sparkles size={20}/>} label="Análisis IA" isSpecial />
             <div className="h-px bg-slate-100 my-4"></div>
@@ -142,14 +166,12 @@ const App: React.FC = () => {
             <NavItem active={activeView === 'budget'} onClick={() => setActiveView('budget')} icon={<PieChart size={20}/>} label="Límites" />
             <NavItem active={activeView === 'settings'} onClick={() => setActiveView('settings')} icon={<Settings2 size={20}/>} label="Ajustes" />
           </nav>
-
-          <button onClick={handleLogout} className="mt-8 flex items-center justify-center gap-2 text-slate-300 text-[10px] font-black uppercase hover:text-rose-500 transition-colors">
+          <button onClick={handleLogout} className="mt-8 flex items-center justify-center gap-2 text-slate-300 text-[10px] font-black uppercase hover:text-rose-500">
             <LogOut size={14} /> Cerrar Sesión
           </button>
         </div>
       </aside>
 
-      {/* Contenido según Módulo Seleccionado */}
       <main className="flex-1 overflow-y-auto p-6 md:p-12">
         <div className="max-w-7xl mx-auto">
           {activeView === 'dashboard' && <Dashboard accounts={accounts} transactions={transactions} investments={investments} budgets={budgets} selectedMonth={selectedMonth} exchangeRate={exchangeRate} onSyncRate={() => {}} isSyncingRate={false} />}
@@ -159,8 +181,6 @@ const App: React.FC = () => {
           {activeView === 'portfolio' && <Portfolio investments={investments} accounts={accounts} onAdd={() => {}} onUpdate={() => {}} onDelete={() => {}} onAddTransaction={handleAddTransaction} exchangeRate={exchangeRate} />}
           {activeView === 'work' && <WorkManagement transactions={transactions} onUpdateTransaction={() => {}} exchangeRate={exchangeRate} />}
           {activeView === 'custody' && <CustodyManagement transactions={transactions} accounts={accounts} onAddTransaction={handleAddTransaction} exchangeRate={exchangeRate} />}
-          {activeView === 'budget' && <BudgetView budgets={budgets} transactions={transactions} onAdd={() => {}} onDelete={() => {}} exchangeRate={exchangeRate} selectedMonth={selectedMonth} expenseCategories={DEFAULT_EXPENSE_CATEGORIES} />}
-          {activeView === 'settings' && <CategorySettings expenseCategories={DEFAULT_EXPENSE_CATEGORIES} incomeCategories={DEFAULT_INCOME_CATEGORIES} onUpdate={() => {}} />}
         </div>
       </main>
 
