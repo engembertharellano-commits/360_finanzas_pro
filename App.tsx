@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   LayoutDashboard, Wallet, TrendingUp, PieChart, Sparkles, CreditCard,
-  LogOut, Settings2, Briefcase, Users
+  LogOut, Settings2, Briefcase, Users, Menu
 } from 'lucide-react';
 import { 
   BankAccount, Transaction, Investment, Budget, User, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_INCOME_CATEGORIES
@@ -25,6 +25,7 @@ import { Auth } from './components/Auth';
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [activeView, setActiveView] = useState<'dashboard' | 'accounts' | 'transactions' | 'portfolio' | 'budget' | 'ai' | 'settings' | 'work' | 'custody'>('dashboard');
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
@@ -62,13 +63,13 @@ const App: React.FC = () => {
     });
   }, [loadAppData]);
 
-  // --- LAS FUNCIONES AHORA SON SIMPLES PORQUE EL SQL HACE EL TRABAJO ---
+  // --- FUNCIONES DE ACCIÓN ---
   
   const handleAddTransaction = async (tData: any) => {
     if (!currentUser) return;
     const { error } = await supabase.from('transactions').insert([{ ...tData, user_id: currentUser.id }]);
     if (error) alert("Error: " + error.message);
-    else loadAppData(currentUser.id); // Al recargar, verás el saldo nuevo calculado por el SQL
+    else loadAppData(currentUser.id);
   };
 
   const handleAddAccount = async (acc: BankAccount) => {
@@ -78,12 +79,25 @@ const App: React.FC = () => {
     loadAppData(currentUser.id);
   };
 
+  const handleDeleteAccount = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: '¿Eliminar cuenta?',
+      message: 'Se perderán los saldos y el historial vinculado.',
+      onConfirm: async () => {
+        await supabase.from('accounts').delete().eq('id', id);
+        loadAppData(currentUser!.id);
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setCurrentUser(null);
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center font-black text-slate-400 italic">SINCRONIZANDO...</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center font-black text-slate-400 italic">CONECTANDO...</div>;
   if (!currentUser) return <Auth onSelectUser={() => {}} />;
 
   return (
@@ -93,22 +107,32 @@ const App: React.FC = () => {
         onConfirm={confirmModal.onConfirm} onClose={() => setConfirmModal(prev => ({...prev, isOpen: false}))}
       />
 
-      <aside className="fixed inset-0 z-50 md:relative md:translate-x-0 md:w-80 bg-white border-r p-8 flex flex-col">
+      {/* Header móvil */}
+      <div className="md:hidden bg-white border-b p-4 flex justify-between items-center sticky top-0 z-50">
+        <div className="flex items-center space-x-2">
+          <Sparkles className="text-slate-900 w-6 h-6" />
+          <span className="font-black">Finanza360</span>
+        </div>
+        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}><Menu /></button>
+      </div>
+
+      <aside className={`fixed inset-0 z-40 md:relative md:translate-x-0 md:w-80 bg-white border-r p-8 flex flex-col transition-transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex items-center space-x-3 mb-10">
           <Sparkles className="text-slate-900 w-8 h-8" />
           <span className="text-2xl font-black tracking-tighter">Finanza360</span>
         </div>
-        <nav className="space-y-1 flex-1 overflow-y-auto">
-          <NavItem active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} icon={<LayoutDashboard size={20}/>} label="Principal" />
-          <NavItem active={activeView === 'ai'} onClick={() => setActiveView('ai')} icon={<Sparkles size={20}/>} label="Análisis IA" isSpecial />
+        <nav className="space-y-1 flex-1 overflow-y-auto custom-scrollbar">
+          <NavItem active={activeView === 'dashboard'} onClick={() => {setActiveView('dashboard'); setIsMobileMenuOpen(false);}} icon={<LayoutDashboard size={20}/>} label="Principal" />
+          <NavItem active={activeView === 'ai'} onClick={() => {setActiveView('ai'); setIsMobileMenuOpen(false);}} icon={<Sparkles size={20}/>} label="Análisis IA" isSpecial />
           <div className="h-px bg-slate-100 my-4"></div>
-          <NavItem active={activeView === 'accounts'} onClick={() => setActiveView('accounts')} icon={<CreditCard size={20}/>} label="Bancos" />
-          <NavItem active={activeView === 'transactions'} onClick={() => setActiveView('transactions')} icon={<Wallet size={20}/>} label="Movimientos" />
-          <NavItem active={activeView === 'portfolio'} onClick={() => setActiveView('portfolio')} icon={<TrendingUp size={20}/>} label="Portafolio" />
+          <NavItem active={activeView === 'accounts'} onClick={() => {setActiveView('accounts'); setIsMobileMenuOpen(false);}} icon={<CreditCard size={20}/>} label="Bancos" />
+          <NavItem active={activeView === 'transactions'} onClick={() => {setActiveView('transactions'); setIsMobileMenuOpen(false);}} icon={<Wallet size={20}/>} label="Movimientos" />
+          <NavItem active={activeView === 'portfolio'} onClick={() => {setActiveView('portfolio'); setIsMobileMenuOpen(false);}} icon={<TrendingUp size={20}/>} label="Portafolio" />
           <div className="h-px bg-slate-100 my-4"></div>
-          <NavItem active={activeView === 'work'} onClick={() => setActiveView('work')} icon={<Briefcase size={20}/>} label="Pote Trabajo" />
-          <NavItem active={activeView === 'custody'} onClick={() => setActiveView('custody')} icon={<Users size={20}/>} label="Custodia" />
-          <NavItem active={activeView === 'budget'} onClick={() => setActiveView('budget')} icon={<PieChart size={20}/>} label="Límites" />
+          <NavItem active={activeView === 'work'} onClick={() => {setActiveView('work'); setIsMobileMenuOpen(false);}} icon={<Briefcase size={20}/>} label="Pote Trabajo" />
+          <NavItem active={activeView === 'custody'} onClick={() => {setActiveView('custody'); setIsMobileMenuOpen(false);}} icon={<Users size={20}/>} label="Custodia" />
+          <NavItem active={activeView === 'budget'} onClick={() => {setActiveView('budget'); setIsMobileMenuOpen(false);}} icon={<PieChart size={20}/>} label="Límites" />
+          <NavItem active={activeView === 'settings'} onClick={() => {setActiveView('settings'); setIsMobileMenuOpen(false);}} icon={<Settings2 size={20}/>} label="Ajustes" />
         </nav>
         <button onClick={handleLogout} className="mt-8 flex items-center justify-center gap-2 text-slate-300 text-[10px] font-black uppercase hover:text-rose-500">
           <LogOut size={14} /> Cerrar Sesión
@@ -119,11 +143,13 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto">
           {activeView === 'dashboard' && <Dashboard accounts={accounts} transactions={transactions} investments={investments} budgets={budgets} selectedMonth={selectedMonth} exchangeRate={exchangeRate} onSyncRate={() => {}} isSyncingRate={false} />}
           {activeView === 'ai' && <AIInsights transactions={transactions} accounts={accounts} investments={investments} selectedMonth={selectedMonth} exchangeRate={exchangeRate} />}
-          {activeView === 'accounts' && <AccountsList accounts={accounts} onAdd={handleAddAccount} onDelete={() => {}} />}
+          {activeView === 'accounts' && <AccountsList accounts={accounts} onAdd={handleAddAccount} onDelete={handleDeleteAccount} />}
           {activeView === 'transactions' && <TransactionsLog transactions={transactions} accounts={accounts} onAdd={handleAddTransaction} onDelete={() => {}} selectedMonth={selectedMonth} exchangeRate={exchangeRate} expenseCategories={DEFAULT_EXPENSE_CATEGORIES} incomeCategories={DEFAULT_INCOME_CATEGORIES} />}
           {activeView === 'portfolio' && <Portfolio investments={investments} accounts={accounts} onAdd={() => {}} onUpdate={() => {}} onDelete={() => {}} onAddTransaction={handleAddTransaction} exchangeRate={exchangeRate} />}
           {activeView === 'work' && <WorkManagement transactions={transactions} onUpdateTransaction={() => {}} exchangeRate={exchangeRate} />}
           {activeView === 'custody' && <CustodyManagement transactions={transactions} accounts={accounts} onAddTransaction={handleAddTransaction} exchangeRate={exchangeRate} />}
+          {activeView === 'budget' && <BudgetView budgets={budgets} transactions={transactions} onAdd={() => {}} onDelete={() => {}} exchangeRate={exchangeRate} selectedMonth={selectedMonth} expenseCategories={DEFAULT_EXPENSE_CATEGORIES} />}
+          {activeView === 'settings' && <CategorySettings expenseCategories={DEFAULT_EXPENSE_CATEGORIES} incomeCategories={DEFAULT_INCOME_CATEGORIES} onUpdate={() => {}} />}
         </div>
       </main>
 
