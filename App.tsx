@@ -8,7 +8,6 @@ import {
 } from './types';
 import { supabase } from './lib/supabase';
 
-// Componentes
 import { Dashboard } from './components/Dashboard';
 import { AccountsList } from './components/AccountsList';
 import { TransactionsLog } from './components/TransactionsLog';
@@ -63,13 +62,15 @@ const App: React.FC = () => {
     });
   }, [loadAppData]);
 
-  // --- FUNCIONES DE ACCIÓN ---
-  
   const handleAddTransaction = async (tData: any) => {
     if (!currentUser) return;
     const { error } = await supabase.from('transactions').insert([{ ...tData, user_id: currentUser.id }]);
-    if (error) alert("Error: " + error.message);
-    else loadAppData(currentUser.id);
+    if (error) {
+        alert("Error al guardar: " + error.message);
+    } else {
+        alert("✅ Movimiento registrado. Actualizando saldos...");
+        loadAppData(currentUser.id);
+    }
   };
 
   const handleAddAccount = async (acc: BankAccount) => {
@@ -79,25 +80,12 @@ const App: React.FC = () => {
     loadAppData(currentUser.id);
   };
 
-  const handleDeleteAccount = (id: string) => {
-    setConfirmModal({
-      isOpen: true,
-      title: '¿Eliminar cuenta?',
-      message: 'Se perderán los saldos y el historial vinculado.',
-      onConfirm: async () => {
-        await supabase.from('accounts').delete().eq('id', id);
-        loadAppData(currentUser!.id);
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
-    });
-  };
-
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setCurrentUser(null);
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center font-black text-slate-400 italic">CONECTANDO...</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center font-black text-slate-400 italic">CARGANDO...</div>;
   if (!currentUser) return <Auth onSelectUser={() => {}} />;
 
   return (
@@ -106,16 +94,8 @@ const App: React.FC = () => {
         isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message}
         onConfirm={confirmModal.onConfirm} onClose={() => setConfirmModal(prev => ({...prev, isOpen: false}))}
       />
-
-      {/* Header móvil */}
-      <div className="md:hidden bg-white border-b p-4 flex justify-between items-center sticky top-0 z-50">
-        <div className="flex items-center space-x-2">
-          <Sparkles className="text-slate-900 w-6 h-6" />
-          <span className="font-black">Finanza360</span>
-        </div>
-        <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}><Menu /></button>
-      </div>
-
+      
+      {/* Sidebar y Navegación */}
       <aside className={`fixed inset-0 z-40 md:relative md:translate-x-0 md:w-80 bg-white border-r p-8 flex flex-col transition-transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex items-center space-x-3 mb-10">
           <Sparkles className="text-slate-900 w-8 h-8" />
@@ -143,13 +123,11 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto">
           {activeView === 'dashboard' && <Dashboard accounts={accounts} transactions={transactions} investments={investments} budgets={budgets} selectedMonth={selectedMonth} exchangeRate={exchangeRate} onSyncRate={() => {}} isSyncingRate={false} />}
           {activeView === 'ai' && <AIInsights transactions={transactions} accounts={accounts} investments={investments} selectedMonth={selectedMonth} exchangeRate={exchangeRate} />}
-          {activeView === 'accounts' && <AccountsList accounts={accounts} onAdd={handleAddAccount} onDelete={handleDeleteAccount} />}
+          {activeView === 'accounts' && <AccountsList accounts={accounts} onAdd={handleAddAccount} onDelete={() => {}} />}
           {activeView === 'transactions' && <TransactionsLog transactions={transactions} accounts={accounts} onAdd={handleAddTransaction} onDelete={() => {}} selectedMonth={selectedMonth} exchangeRate={exchangeRate} expenseCategories={DEFAULT_EXPENSE_CATEGORIES} incomeCategories={DEFAULT_INCOME_CATEGORIES} />}
           {activeView === 'portfolio' && <Portfolio investments={investments} accounts={accounts} onAdd={() => {}} onUpdate={() => {}} onDelete={() => {}} onAddTransaction={handleAddTransaction} exchangeRate={exchangeRate} />}
           {activeView === 'work' && <WorkManagement transactions={transactions} onUpdateTransaction={() => {}} exchangeRate={exchangeRate} />}
           {activeView === 'custody' && <CustodyManagement transactions={transactions} accounts={accounts} onAddTransaction={handleAddTransaction} exchangeRate={exchangeRate} />}
-          {activeView === 'budget' && <BudgetView budgets={budgets} transactions={transactions} onAdd={() => {}} onDelete={() => {}} exchangeRate={exchangeRate} selectedMonth={selectedMonth} expenseCategories={DEFAULT_EXPENSE_CATEGORIES} />}
-          {activeView === 'settings' && <CategorySettings expenseCategories={DEFAULT_EXPENSE_CATEGORIES} incomeCategories={DEFAULT_INCOME_CATEGORIES} onUpdate={() => {}} />}
         </div>
       </main>
 
