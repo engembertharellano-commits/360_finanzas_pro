@@ -1,7 +1,7 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   LayoutDashboard, Wallet, TrendingUp, PieChart, Sparkles, CreditCard,
-  Menu, X, ChevronLeft, ChevronRight, LogOut, Settings2, Briefcase, Users
+  LogOut, Settings2, Briefcase, Users
 } from 'lucide-react';
 import { 
   BankAccount, Transaction, Investment, Budget, User, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_INCOME_CATEGORIES
@@ -25,14 +25,13 @@ import { Auth } from './components/Auth';
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeView, setActiveView] = useState<View>('dashboard');
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [activeView, setActiveView] = useState<'dashboard' | 'accounts' | 'transactions' | 'portfolio' | 'budget' | 'ai' | 'settings' | 'work' | 'custody'>('dashboard');
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
 
-  const [exchangeRate, setExchangeRate] = useState<number>(45.50);
+  const [exchangeRate] = useState<number>(45.50);
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]);
@@ -40,7 +39,6 @@ const App: React.FC = () => {
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
 
   const loadAppData = useCallback(async (userId: string) => {
-    setLoading(true);
     const [accs, trans, invs, buds] = await Promise.all([
       supabase.from('accounts').select('*').eq('user_id', userId),
       supabase.from('transactions').select('*').eq('user_id', userId).order('date', { ascending: false }),
@@ -64,72 +62,20 @@ const App: React.FC = () => {
     });
   }, [loadAppData]);
 
-  // --- LÓGICA DE ACTUALIZACIÓN DE SALDOS ---
-
+  // --- LAS FUNCIONES AHORA SON SIMPLES PORQUE EL SQL HACE EL TRABAJO ---
+  
   const handleAddTransaction = async (tData: any) => {
     if (!currentUser) return;
-
-    // 1. Buscamos la cuenta afectada
-    const account = accounts.find(a => a.id === tData.accountId);
-    if (!account) return;
-
-    // 2. Calculamos el nuevo saldo localmente
-    let newBalance = Number(account.balance);
-    const amount = Number(tData.amount);
-    const commission = Number(tData.commission || 0);
-
-    if (tData.type === 'expense') newBalance -= (amount + commission);
-    if (tData.type === 'income') newBalance += (amount - commission);
-    
-    // 3. Si es transferencia, afectamos la cuenta destino también
-    let destAccount = null;
-    if (tData.type === 'transfer' && tData.toAccountId) {
-        newBalance -= (amount + commission);
-        destAccount = accounts.find(a => a.id === tData.toAccountId);
-    }
-
-    // 4. GUARDAR TODO EN SUPABASE (Transacción + Saldo actualizado)
-    const { data: newTx, error: txErr } = await supabase
-      .from('transactions')
-      .insert([{ ...tData, user_id: currentUser.id }])
-      .select().single();
-
-    if (txErr) {
-        alert("Error al guardar movimiento: " + txErr.message);
-        return;
-    }
-
-    // Actualizar saldo de cuenta origen
-    await supabase.from('accounts').update({ balance: newBalance }).eq('id', tData.accountId);
-
-    // Actualizar saldo de cuenta destino si es transferencia
-    if (destAccount) {
-        const newDestBalance = Number(destAccount.balance) + amount;
-        await supabase.from('accounts').update({ balance: newDestBalance }).eq('id', tData.toAccountId);
-    }
-
-    // 5. Refrescar la interfaz
-    loadAppData(currentUser.id);
+    const { error } = await supabase.from('transactions').insert([{ ...tData, user_id: currentUser.id }]);
+    if (error) alert("Error: " + error.message);
+    else loadAppData(currentUser.id); // Al recargar, verás el saldo nuevo calculado por el SQL
   };
 
   const handleAddAccount = async (acc: BankAccount) => {
     if (!currentUser) return;
     const { id, ...cleanData } = acc;
-    const { data } = await supabase.from('accounts').insert([{ ...cleanData, user_id: currentUser.id }]).select().single();
-    if (data) setAccounts(prev => [...prev, data]);
-  };
-
-  const handleDeleteAccount = (id: string) => {
-    setConfirmModal({
-      isOpen: true,
-      title: '¿Eliminar cuenta?',
-      message: 'Se borrarán todos los saldos y movimientos de esta cuenta.',
-      onConfirm: async () => {
-        await supabase.from('accounts').delete().eq('id', id);
-        loadAppData(currentUser!.id);
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
-    });
+    await supabase.from('accounts').insert([{ ...cleanData, user_id: currentUser.id }]);
+    loadAppData(currentUser.id);
   };
 
   const handleLogout = async () => {
@@ -137,46 +83,43 @@ const App: React.FC = () => {
     setCurrentUser(null);
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center font-black text-slate-400 italic">ACTUALIZANDO SALDOS...</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center font-black text-slate-400 italic">SINCRONIZANDO...</div>;
   if (!currentUser) return <Auth onSelectUser={() => {}} />;
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 text-slate-900 font-sans overflow-x-hidden">
+    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 text-slate-900 font-sans">
       <ConfirmationModal 
         isOpen={confirmModal.isOpen} title={confirmModal.title} message={confirmModal.message}
         onConfirm={confirmModal.onConfirm} onClose={() => setConfirmModal(prev => ({...prev, isOpen: false}))}
       />
 
-      <aside className={`fixed inset-0 z-50 md:relative md:translate-x-0 md:w-80 bg-white border-r transition-transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="h-full flex flex-col p-8">
-          <div className="flex items-center space-x-3 mb-10">
-            <Sparkles className="text-slate-900 w-8 h-8" />
-            <span className="text-2xl font-black tracking-tighter">Finanza360</span>
-          </div>
-          <nav className="space-y-1 flex-1 overflow-y-auto">
-            <NavItem active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} icon={<LayoutDashboard size={20}/>} label="Principal" />
-            <NavItem active={activeView === 'ai'} onClick={() => setActiveView('ai')} icon={<Sparkles size={20}/>} label="Análisis IA" isSpecial />
-            <div className="h-px bg-slate-100 my-4"></div>
-            <NavItem active={activeView === 'accounts'} onClick={() => setActiveView('accounts')} icon={<CreditCard size={20}/>} label="Bancos" />
-            <NavItem active={activeView === 'transactions'} onClick={() => setActiveView('transactions')} icon={<Wallet size={20}/>} label="Movimientos" />
-            <NavItem active={activeView === 'portfolio'} onClick={() => setActiveView('portfolio')} icon={<TrendingUp size={20}/>} label="Portafolio" />
-            <div className="h-px bg-slate-100 my-4"></div>
-            <NavItem active={activeView === 'work'} onClick={() => setActiveView('work')} icon={<Briefcase size={20}/>} label="Pote Trabajo" />
-            <NavItem active={activeView === 'custody'} onClick={() => setActiveView('custody')} icon={<Users size={20}/>} label="Custodia" />
-            <NavItem active={activeView === 'budget'} onClick={() => setActiveView('budget')} icon={<PieChart size={20}/>} label="Límites" />
-            <NavItem active={activeView === 'settings'} onClick={() => setActiveView('settings')} icon={<Settings2 size={20}/>} label="Ajustes" />
-          </nav>
-          <button onClick={handleLogout} className="mt-8 flex items-center justify-center gap-2 text-slate-300 text-[10px] font-black uppercase hover:text-rose-500">
-            <LogOut size={14} /> Cerrar Sesión
-          </button>
+      <aside className="fixed inset-0 z-50 md:relative md:translate-x-0 md:w-80 bg-white border-r p-8 flex flex-col">
+        <div className="flex items-center space-x-3 mb-10">
+          <Sparkles className="text-slate-900 w-8 h-8" />
+          <span className="text-2xl font-black tracking-tighter">Finanza360</span>
         </div>
+        <nav className="space-y-1 flex-1 overflow-y-auto">
+          <NavItem active={activeView === 'dashboard'} onClick={() => setActiveView('dashboard')} icon={<LayoutDashboard size={20}/>} label="Principal" />
+          <NavItem active={activeView === 'ai'} onClick={() => setActiveView('ai')} icon={<Sparkles size={20}/>} label="Análisis IA" isSpecial />
+          <div className="h-px bg-slate-100 my-4"></div>
+          <NavItem active={activeView === 'accounts'} onClick={() => setActiveView('accounts')} icon={<CreditCard size={20}/>} label="Bancos" />
+          <NavItem active={activeView === 'transactions'} onClick={() => setActiveView('transactions')} icon={<Wallet size={20}/>} label="Movimientos" />
+          <NavItem active={activeView === 'portfolio'} onClick={() => setActiveView('portfolio')} icon={<TrendingUp size={20}/>} label="Portafolio" />
+          <div className="h-px bg-slate-100 my-4"></div>
+          <NavItem active={activeView === 'work'} onClick={() => setActiveView('work')} icon={<Briefcase size={20}/>} label="Pote Trabajo" />
+          <NavItem active={activeView === 'custody'} onClick={() => setActiveView('custody')} icon={<Users size={20}/>} label="Custodia" />
+          <NavItem active={activeView === 'budget'} onClick={() => setActiveView('budget')} icon={<PieChart size={20}/>} label="Límites" />
+        </nav>
+        <button onClick={handleLogout} className="mt-8 flex items-center justify-center gap-2 text-slate-300 text-[10px] font-black uppercase hover:text-rose-500">
+          <LogOut size={14} /> Cerrar Sesión
+        </button>
       </aside>
 
       <main className="flex-1 overflow-y-auto p-6 md:p-12">
         <div className="max-w-7xl mx-auto">
           {activeView === 'dashboard' && <Dashboard accounts={accounts} transactions={transactions} investments={investments} budgets={budgets} selectedMonth={selectedMonth} exchangeRate={exchangeRate} onSyncRate={() => {}} isSyncingRate={false} />}
           {activeView === 'ai' && <AIInsights transactions={transactions} accounts={accounts} investments={investments} selectedMonth={selectedMonth} exchangeRate={exchangeRate} />}
-          {activeView === 'accounts' && <AccountsList accounts={accounts} onAdd={handleAddAccount} onDelete={handleDeleteAccount} />}
+          {activeView === 'accounts' && <AccountsList accounts={accounts} onAdd={handleAddAccount} onDelete={() => {}} />}
           {activeView === 'transactions' && <TransactionsLog transactions={transactions} accounts={accounts} onAdd={handleAddTransaction} onDelete={() => {}} selectedMonth={selectedMonth} exchangeRate={exchangeRate} expenseCategories={DEFAULT_EXPENSE_CATEGORIES} incomeCategories={DEFAULT_INCOME_CATEGORIES} />}
           {activeView === 'portfolio' && <Portfolio investments={investments} accounts={accounts} onAdd={() => {}} onUpdate={() => {}} onDelete={() => {}} onAddTransaction={handleAddTransaction} exchangeRate={exchangeRate} />}
           {activeView === 'work' && <WorkManagement transactions={transactions} onUpdateTransaction={() => {}} exchangeRate={exchangeRate} />}
