@@ -8,7 +8,7 @@ import {
 } from './types';
 import { supabase } from './lib/supabase';
 
-// --- IMPORTACIÓN DE TODOS LOS COMPONENTES ---
+// --- COMPONENTES ---
 import { Dashboard } from './components/Dashboard';
 import { AccountsList } from './components/AccountsList';
 import { TransactionsLog } from './components/TransactionsLog';
@@ -23,7 +23,6 @@ import { CustodyManagement } from './components/CustodyManagement';
 import { Auth } from './components/Auth';
 
 const App: React.FC = () => {
-  // --- ESTADOS ---
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -40,7 +39,6 @@ const App: React.FC = () => {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
 
-  // --- CARGA DE DATOS ---
   const loadAppData = useCallback(async (userId: string) => {
     const [accs, trans, invs, buds] = await Promise.all([
       supabase.from('accounts').select('*').eq('user_id', userId),
@@ -66,7 +64,6 @@ const App: React.FC = () => {
   }, [loadAppData]);
 
   // --- FUNCIONES DE GUARDADO ---
-  
   const handleAddTransaction = async (tData: any) => {
     if (!currentUser) return;
     const cleanPayload = {
@@ -84,10 +81,8 @@ const App: React.FC = () => {
 
   const handleAddInvestment = async (invData: any) => {
     if (!currentUser) return;
-    // Aseguramos que el brokerId y el user_id estén presentes
-    const cleanInv = { ...invData, user_id: currentUser.id };
-    const { error } = await supabase.from('investments').insert([cleanInv]);
-    if (error) alert("Error en Portafolio: " + error.message);
+    const { error } = await supabase.from('investments').insert([{ ...invData, user_id: currentUser.id }]);
+    if (error) alert("Error: " + error.message);
     else loadAppData(currentUser.id);
   };
 
@@ -98,15 +93,27 @@ const App: React.FC = () => {
     loadAppData(currentUser.id);
   };
 
-  // --- FUNCIONES DE ELIMINAR ---
-
+  // --- FUNCIONES DE ELIMINADO ---
   const handleDeleteTransaction = (id: string) => {
     setConfirmModal({
       isOpen: true,
       title: '¿Eliminar registro?',
-      message: 'El saldo se revertirá automáticamente en tus cuentas.',
+      message: 'Los saldos se revertirán automáticamente.',
       onConfirm: async () => {
         await supabase.from('transactions').delete().eq('id', id);
+        loadAppData(currentUser!.id);
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
+  const handleDeleteAccount = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: '¿Eliminar cuenta?',
+      message: 'Esta acción borrará todo el historial de esta cuenta.',
+      onConfirm: async () => {
+        await supabase.from('accounts').delete().eq('id', id);
         loadAppData(currentUser!.id);
         setConfirmModal(prev => ({ ...prev, isOpen: false }));
       }
@@ -117,7 +124,7 @@ const App: React.FC = () => {
     setConfirmModal({
       isOpen: true,
       title: '¿Eliminar inversión?',
-      message: 'Se quitará este activo de tu portafolio.',
+      message: 'Se quitará el activo del portafolio.',
       onConfirm: async () => {
         await supabase.from('investments').delete().eq('id', id);
         loadAppData(currentUser!.id);
@@ -131,7 +138,7 @@ const App: React.FC = () => {
     setCurrentUser(null);
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center font-black text-slate-400 italic uppercase tracking-widest">Finanza360...</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center font-black text-slate-400 italic tracking-widest uppercase">Finanza360...</div>;
   if (!currentUser) return <Auth onSelectUser={() => {}} />;
 
   return (
@@ -141,13 +148,10 @@ const App: React.FC = () => {
         onConfirm={confirmModal.onConfirm} onClose={() => setConfirmModal(prev => ({...prev, isOpen: false}))}
       />
 
-      {/* Sidebar de Navegación */}
       <aside className={`fixed inset-0 z-40 md:relative md:translate-x-0 md:w-80 bg-white border-r p-8 flex flex-col transition-transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="flex items-center space-x-3 mb-10">
-          <Sparkles className="text-slate-900 w-8 h-8" />
-          <span className="text-2xl font-black tracking-tighter uppercase italic">Finanza360</span>
+        <div className="flex items-center space-x-3 mb-10 text-2xl font-black uppercase italic tracking-tighter">
+          <Sparkles className="w-8 h-8" /> <span>Finanza360</span>
         </div>
-        
         <nav className="space-y-1 flex-1 overflow-y-auto">
           <NavItem active={activeView === 'dashboard'} onClick={() => {setActiveView('dashboard'); setIsMobileMenuOpen(false);}} icon={<LayoutDashboard size={20}/>} label="Principal" />
           <NavItem active={activeView === 'ai'} onClick={() => {setActiveView('ai'); setIsMobileMenuOpen(false);}} icon={<Sparkles size={20}/>} label="Análisis IA" isSpecial />
@@ -158,10 +162,8 @@ const App: React.FC = () => {
           <div className="h-px bg-slate-100 my-4"></div>
           <NavItem active={activeView === 'work'} onClick={() => {setActiveView('work'); setIsMobileMenuOpen(false);}} icon={<Briefcase size={20}/>} label="Pote Trabajo" />
           <NavItem active={activeView === 'custody'} onClick={() => {setActiveView('custody'); setIsMobileMenuOpen(false);}} icon={<Users size={20}/>} label="Custodia" />
-          <NavItem active={activeView === 'budget'} onClick={() => {setActiveView('budget'); setIsMobileMenuOpen(false);}} icon={<PieChart size={20}/>} label="Límites" />
         </nav>
-
-        <button onClick={handleLogout} className="mt-8 flex items-center justify-center gap-2 text-slate-300 text-[10px] font-black uppercase hover:text-rose-500 transition-colors">
+        <button onClick={handleLogout} className="mt-8 flex items-center justify-center gap-2 text-slate-300 text-[10px] font-black uppercase hover:text-rose-500">
           <LogOut size={14} /> Cerrar Sesión
         </button>
       </aside>
@@ -170,15 +172,13 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto">
           {activeView === 'dashboard' && <Dashboard accounts={accounts} transactions={transactions} investments={investments} budgets={budgets} selectedMonth={selectedMonth} exchangeRate={exchangeRate} onSyncRate={() => {}} isSyncingRate={false} />}
           {activeView === 'ai' && <AIInsights transactions={transactions} accounts={accounts} investments={investments} selectedMonth={selectedMonth} exchangeRate={exchangeRate} />}
-          {activeView === 'accounts' && <AccountsList accounts={accounts} onAdd={handleAddAccount} onDelete={() => {}} />}
+          {activeView === 'accounts' && <AccountsList accounts={accounts} onAdd={handleAddAccount} onDelete={handleDeleteAccount} />}
           {activeView === 'transactions' && <TransactionsLog transactions={transactions} accounts={accounts} onAdd={handleAddTransaction} onDelete={handleDeleteTransaction} selectedMonth={selectedMonth} exchangeRate={exchangeRate} expenseCategories={DEFAULT_EXPENSE_CATEGORIES} incomeCategories={DEFAULT_INCOME_CATEGORIES} />}
           {activeView === 'portfolio' && <Portfolio investments={investments} accounts={accounts} onAdd={handleAddInvestment} onUpdate={() => {}} onDelete={handleDeleteInvestment} onAddTransaction={handleAddTransaction} exchangeRate={exchangeRate} />}
           {activeView === 'work' && <WorkManagement transactions={transactions} onUpdateTransaction={() => {}} onDeleteTransaction={handleDeleteTransaction} exchangeRate={exchangeRate} />}
           {activeView === 'custody' && <CustodyManagement transactions={transactions} accounts={accounts} onAddTransaction={handleAddTransaction} onDeleteTransaction={handleDeleteTransaction} exchangeRate={exchangeRate} />}
-          {activeView === 'budget' && <BudgetView budgets={budgets} transactions={transactions} onAdd={() => {}} onDelete={() => {}} exchangeRate={exchangeRate} selectedMonth={selectedMonth} expenseCategories={DEFAULT_EXPENSE_CATEGORIES} />}
         </div>
       </main>
-
       <AIChat transactions={transactions} accounts={accounts} />
     </div>
   );
@@ -186,7 +186,7 @@ const App: React.FC = () => {
 
 const NavItem = ({ active, onClick, icon, label, isSpecial }: any) => (
   <button onClick={onClick} className={`flex items-center space-x-4 w-full p-4 rounded-2xl transition-all ${active ? (isSpecial ? 'bg-indigo-600 text-white shadow-xl' : 'bg-slate-900 text-white shadow-xl') : 'text-slate-500 hover:bg-slate-100'}`}>
-    {icon} <span className="text-sm font-bold tracking-tight">{label}</span>
+    {icon} <span className="text-sm font-bold">{label}</span>
   </button>
 );
 
