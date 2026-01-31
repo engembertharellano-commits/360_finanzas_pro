@@ -1,7 +1,7 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { Budget, Currency, Transaction } from '../types';
 import { Plus, PieChart, AlertCircle, Trash2, Wallet, TrendingUp, ChevronRight, Info } from 'lucide-react';
+import { supabase } from '../lib/supabase'; // <--- IMPORTACIÓN AGREGADA
 
 interface Props {
   budgets: Budget[];
@@ -43,7 +43,7 @@ export const BudgetView: React.FC<Props> = ({
   }, [budgets, selectedMonth]);
 
   const budgetsWithSpent = useMemo(() => {
-    const monthTransactions = transactions.filter(t => t.date.startsWith(selectedMonth) && t.type === 'Gasto');
+    const monthTransactions = transactions.filter(t => t.date.startsWith(selectedMonth) && (t.type === 'Gasto' || t.type === 'expense')); // <--- Ajuste pequeño para compatibilidad
 
     return activeBudgets.map(b => {
       const spent = monthTransactions
@@ -64,12 +64,49 @@ export const BudgetView: React.FC<Props> = ({
     return { totalUSD, totalVES, totalSpentUSD, totalSpentVES };
   }, [budgetsWithSpent]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // --- LÓGICA CONECTADA A SUPABASE ---
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onAdd({ ...newBudget, month: selectedMonth });
-    setShowForm(false);
-    setNewBudget({ category: expenseCategories[0] || '', limit: 0, currency: 'USD' });
+    
+    // 1. Obtenemos usuario
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // 2. Preparamos datos
+    const payload = {
+        user_id: user.id,
+        category: newBudget.category,
+        limit: newBudget.limit,
+        month: selectedMonth,
+        currency: newBudget.currency
+    };
+
+    // 3. Enviamos a Supabase
+    const { error } = await supabase.from('budgets').insert([payload]);
+
+    if (error) {
+        alert("Error al guardar: " + error.message);
+    } else {
+        // 4. Limpiamos y recargamos
+        setShowForm(false);
+        setNewBudget({ category: expenseCategories[0] || '', limit: 0, currency: 'USD' });
+        // Recarga forzosa para ver los cambios de inmediato
+        window.location.reload();
+    }
   };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("¿Estás seguro de eliminar este límite?")) return;
+    
+    const { error } = await supabase.from('budgets').delete().eq('id', id);
+    
+    if (error) {
+        alert("Error al borrar: " + error.message);
+    } else {
+        window.location.reload();
+    }
+  };
+  // ------------------------------------
 
   const [year, month] = selectedMonth.split('-').map(Number);
   const monthName = new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(new Date(year, month - 1));
@@ -194,7 +231,7 @@ export const BudgetView: React.FC<Props> = ({
                   </p>
                 </div>
                 {!isHistorical && (
-                  <button onClick={() => onDelete(b.id)} className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-rose-500 transition-all bg-slate-50 rounded-xl">
+                  <button onClick={() => handleDelete(b.id)} className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-rose-500 transition-all bg-slate-50 rounded-xl">
                     <Trash2 size={16} />
                   </button>
                 )}
