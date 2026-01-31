@@ -1,13 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Budget, Currency, Transaction } from '../types';
-import { Plus, PieChart, AlertCircle, Trash2, Wallet, TrendingUp, ChevronRight, Info } from 'lucide-react';
-import { supabase } from '../lib/supabase'; // <--- IMPORTACIÓN AGREGADA
+import { Plus, PieChart, AlertCircle, Trash2, Wallet, TrendingUp, ChevronRight } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface Props {
   budgets: Budget[];
   transactions: Transaction[];
-  onAdd: (b: Omit<Budget, 'id'>) => void;
-  onDelete: (id: string) => void;
+  onAdd: () => void;    // Simplificado para solo avisar
+  onDelete: () => void; // Simplificado para solo avisar
   exchangeRate: number;
   selectedMonth: string;
   expenseCategories: string[];
@@ -31,7 +31,6 @@ export const BudgetView: React.FC<Props> = ({
 
   const activeBudgets = useMemo(() => {
     const categories = Array.from(new Set(budgets.map(b => b.category)));
-    
     return categories.map(cat => {
       const currentMonthBudget = budgets.find(b => b.category === cat && b.month === selectedMonth);
       if (currentMonthBudget) return currentMonthBudget;
@@ -43,8 +42,7 @@ export const BudgetView: React.FC<Props> = ({
   }, [budgets, selectedMonth]);
 
   const budgetsWithSpent = useMemo(() => {
-    const monthTransactions = transactions.filter(t => t.date.startsWith(selectedMonth) && (t.type === 'Gasto' || t.type === 'expense')); // <--- Ajuste pequeño para compatibilidad
-
+    const monthTransactions = transactions.filter(t => t.date.startsWith(selectedMonth) && (t.type === 'Gasto' || t.type === 'expense'));
     return activeBudgets.map(b => {
       const spent = monthTransactions
         .filter(t => t.category === b.category)
@@ -64,15 +62,12 @@ export const BudgetView: React.FC<Props> = ({
     return { totalUSD, totalVES, totalSpentUSD, totalSpentVES };
   }, [budgetsWithSpent]);
 
-  // --- LÓGICA CONECTADA A SUPABASE ---
+  // --- LÓGICA SIN SALTOS ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // 1. Obtenemos usuario
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // 2. Preparamos datos
     const payload = {
         user_id: user.id,
         category: newBudget.category,
@@ -81,32 +76,23 @@ export const BudgetView: React.FC<Props> = ({
         currency: newBudget.currency
     };
 
-    // 3. Enviamos a Supabase
     const { error } = await supabase.from('budgets').insert([payload]);
 
     if (error) {
-        alert("Error al guardar: " + error.message);
+        alert("Error: " + error.message);
     } else {
-        // 4. Limpiamos y recargamos
         setShowForm(false);
         setNewBudget({ category: expenseCategories[0] || '', limit: 0, currency: 'USD' });
-        // Recarga forzosa para ver los cambios de inmediato
-        window.location.reload();
+        // ¡MAGIA! Llamamos a onAdd() en lugar de recargar la página
+        onAdd(); 
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("¿Estás seguro de eliminar este límite?")) return;
-    
+    if (!confirm("¿Borrar este presupuesto?")) return;
     const { error } = await supabase.from('budgets').delete().eq('id', id);
-    
-    if (error) {
-        alert("Error al borrar: " + error.message);
-    } else {
-        window.location.reload();
-    }
+    if (!error) onDelete(); // Recarga suave
   };
-  // ------------------------------------
 
   const [year, month] = selectedMonth.split('-').map(Number);
   const monthName = new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(new Date(year, month - 1));
@@ -121,8 +107,9 @@ export const BudgetView: React.FC<Props> = ({
                  <PieChart size={24} />
                </div>
                <div>
+                 {/* NOMBRE CAMBIADO */}
                  <h2 className="text-2xl font-black text-slate-900 leading-none">Presupuesto Global</h2>
-                 <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Configuración para {monthName}</p>
+                 <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Planificación para {monthName}</p>
                </div>
              </div>
              
@@ -153,7 +140,7 @@ export const BudgetView: React.FC<Props> = ({
             onClick={() => setShowForm(!showForm)}
             className="w-full md:w-auto bg-slate-900 text-white px-8 py-4 rounded-2xl font-black hover:bg-slate-800 transition-all flex items-center justify-center gap-3 shadow-xl"
           >
-            <Plus size={20} /> {showForm ? 'Cerrar Formulario' : 'Ajustar Límites'}
+            <Plus size={20} /> {showForm ? 'Cerrar' : 'Nuevo Presupuesto'}
           </button>
         </div>
         <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
@@ -165,11 +152,11 @@ export const BudgetView: React.FC<Props> = ({
         <form onSubmit={handleSubmit} className="bg-white p-8 rounded-[2.5rem] border border-indigo-100 shadow-2xl animate-in zoom-in duration-300">
           <div className="flex items-center gap-2 mb-6 text-indigo-600">
              <TrendingUp size={18} />
-             <h3 className="font-black uppercase text-xs tracking-widest">Definir Límite para {monthName}</h3>
+             <h3 className="font-black uppercase text-xs tracking-widest">Definir Presupuesto - {monthName}</h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
             <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider ml-1">Categoría de Gasto</label>
+              <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider ml-1">Categoría</label>
               <select 
                 className="w-full px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-900"
                 value={newBudget.category}
@@ -179,7 +166,7 @@ export const BudgetView: React.FC<Props> = ({
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider ml-1">Límite Mensual</label>
+              <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider ml-1">Tope Mensual</label>
               <div className="flex gap-2">
                 <input 
                   type="number" 
@@ -201,7 +188,7 @@ export const BudgetView: React.FC<Props> = ({
               </div>
             </div>
             <button type="submit" className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black hover:bg-indigo-700 shadow-lg shadow-indigo-100 flex items-center justify-center gap-2">
-              Establecer para {monthName} <ChevronRight size={18} />
+              Guardar <ChevronRight size={18} />
             </button>
           </div>
         </form>
@@ -223,11 +210,11 @@ export const BudgetView: React.FC<Props> = ({
                   <div className="flex items-center gap-2">
                     <h3 className="text-lg font-black text-slate-900">{b.category}</h3>
                     {isHistorical && (
-                      <span className="text-[8px] font-black bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full uppercase tracking-tighter" title="Heredado del mes anterior">Fijo</span>
+                      <span className="text-[8px] font-black bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full uppercase tracking-tighter" title="Mes pasado">Fijo</span>
                     )}
                   </div>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
-                    Límite: {b.currency === 'USD' ? '$' : 'Bs '}{limit.toLocaleString()}
+                    Tope: {b.currency === 'USD' ? '$' : 'Bs '}{limit.toLocaleString()}
                   </p>
                 </div>
                 {!isHistorical && (
@@ -258,10 +245,10 @@ export const BudgetView: React.FC<Props> = ({
 
                 <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
                   <span className={isOver ? 'text-rose-600 animate-pulse' : isWarning ? 'text-amber-500' : 'text-slate-400'}>
-                    {isOver ? 'Excedido' : isWarning ? 'Cerca del Límite' : 'Controlado'}
+                    {isOver ? '¡Excedido!' : isWarning ? 'Cuidado' : 'En orden'}
                   </span>
                   <span className="text-slate-400">
-                    Restante: {b.currency === 'USD' ? '$' : 'Bs '}{Math.max(0, limit - spent).toLocaleString()}
+                    Quedan: {b.currency === 'USD' ? '$' : 'Bs '}{Math.max(0, limit - spent).toLocaleString()}
                   </span>
                 </div>
               </div>
