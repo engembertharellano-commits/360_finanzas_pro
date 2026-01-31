@@ -8,7 +8,7 @@ import {
 } from './types';
 import { supabase } from './lib/supabase';
 
-// --- COMPONENTES ---
+// Componentes
 import { Dashboard } from './components/Dashboard';
 import { AccountsList } from './components/AccountsList';
 import { TransactionsLog } from './components/TransactionsLog';
@@ -63,8 +63,7 @@ const App: React.FC = () => {
     });
   }, [loadAppData]);
 
-  // --- FUNCIONES DE GUARDADO ---
-  
+  // FUNCIONES DE GUARDADO
   const handleAddTransaction = async (tData: any) => {
     if (!currentUser) return;
     const cleanPayload = {
@@ -82,31 +81,20 @@ const App: React.FC = () => {
 
   const handleAddInvestment = async (invData: any) => {
     if (!currentUser) return;
-
-    // TRUCO MAESTRO: Enviamos los datos duplicados con ambos nombres
-    // para asegurarnos de que la base de datos los reciba sí o sí.
     const safeInvestment = {
       ...invData,
       user_id: currentUser.id,
-      // Nombres camelCase (Javascript)
       buyPrice: Number(invData.buyPrice) || 0,
       buyCommission: Number(invData.buyCommission) || 0,
       currentPrice: Number(invData.currentPrice) || 0,
       quantity: Number(invData.quantity) || 0,
-      // Nombres snake_case (Base de Datos) - ESTO SOLUCIONA EL ERROR
       buy_price: Number(invData.buyPrice) || 0,
       buy_commission: Number(invData.buyCommission) || 0,
       current_price: Number(invData.currentPrice) || 0,
     };
-
     const { error } = await supabase.from('investments').insert([safeInvestment]);
-    
-    if (error) {
-        alert("⚠️ Error: " + error.message);
-    } else {
-        alert("✅ Activo guardado correctamente");
-        loadAppData(currentUser.id);
-    }
+    if (error) alert("⚠️ Error: " + error.message);
+    else { alert("✅ Activo guardado correctamente"); loadAppData(currentUser.id); }
   };
 
   const handleAddAccount = async (acc: BankAccount) => {
@@ -116,43 +104,29 @@ const App: React.FC = () => {
     loadAppData(currentUser.id);
   };
 
-  // --- FUNCIONES DE ELIMINADO ---
+  // FUNCIONES DE ELIMINADO Y ACTUALIZACIÓN
+  const refreshData = () => {
+    if (currentUser) loadAppData(currentUser.id);
+  };
+
   const handleDeleteTransaction = (id: string) => {
     setConfirmModal({
-      isOpen: true,
-      title: '¿Eliminar registro?',
-      message: 'El saldo se revertirá automáticamente.',
-      onConfirm: async () => {
-        await supabase.from('transactions').delete().eq('id', id);
-        loadAppData(currentUser!.id);
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
+      isOpen: true, title: '¿Eliminar registro?', message: 'El saldo se revertirá automáticamente.',
+      onConfirm: async () => { await supabase.from('transactions').delete().eq('id', id); refreshData(); setConfirmModal(prev => ({ ...prev, isOpen: false })); }
     });
   };
 
   const handleDeleteInvestment = (id: string) => {
     setConfirmModal({
-      isOpen: true,
-      title: '¿Eliminar inversión?',
-      message: 'Se quitará del portafolio.',
-      onConfirm: async () => {
-        await supabase.from('investments').delete().eq('id', id);
-        loadAppData(currentUser!.id);
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
+      isOpen: true, title: '¿Eliminar inversión?', message: 'Se quitará del portafolio.',
+      onConfirm: async () => { await supabase.from('investments').delete().eq('id', id); refreshData(); setConfirmModal(prev => ({ ...prev, isOpen: false })); }
     });
   };
 
   const handleDeleteAccount = (id: string) => {
     setConfirmModal({
-      isOpen: true,
-      title: '¿Eliminar cuenta?',
-      message: 'Se borrará todo el historial.',
-      onConfirm: async () => {
-        await supabase.from('accounts').delete().eq('id', id);
-        loadAppData(currentUser!.id);
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
+      isOpen: true, title: '¿Eliminar cuenta?', message: 'Se borrará todo el historial.',
+      onConfirm: async () => { await supabase.from('accounts').delete().eq('id', id); refreshData(); setConfirmModal(prev => ({ ...prev, isOpen: false })); }
     });
   };
 
@@ -185,7 +159,8 @@ const App: React.FC = () => {
           <div className="h-px bg-slate-100 my-4"></div>
           <NavItem active={activeView === 'work'} onClick={() => {setActiveView('work'); setIsMobileMenuOpen(false);}} icon={<Briefcase size={20}/>} label="Pote Trabajo" />
           <NavItem active={activeView === 'custody'} onClick={() => {setActiveView('custody'); setIsMobileMenuOpen(false);}} icon={<Users size={20}/>} label="Custodia" />
-          <NavItem active={activeView === 'budget'} onClick={() => {setActiveView('budget'); setIsMobileMenuOpen(false);}} icon={<PieChart size={20}/>} label="Límites" />
+          {/* AQUÍ ESTÁ EL CAMBIO DE NOMBRE */}
+          <NavItem active={activeView === 'budget'} onClick={() => {setActiveView('budget'); setIsMobileMenuOpen(false);}} icon={<PieChart size={20}/>} label="Presupuesto" />
           <NavItem active={activeView === 'settings'} onClick={() => {setActiveView('settings'); setIsMobileMenuOpen(false);}} icon={<Settings2 size={20}/>} label="Ajustes" />
         </nav>
         <button onClick={handleLogout} className="mt-8 flex items-center justify-center gap-2 text-slate-300 text-[10px] font-black uppercase hover:text-rose-500 transition-colors">
@@ -202,7 +177,8 @@ const App: React.FC = () => {
           {activeView === 'portfolio' && <Portfolio investments={investments} accounts={accounts} onAdd={handleAddInvestment} onUpdate={() => {}} onDelete={handleDeleteInvestment} onAddTransaction={handleAddTransaction} exchangeRate={exchangeRate} />}
           {activeView === 'work' && <WorkManagement transactions={transactions} onUpdateTransaction={() => {}} onDeleteTransaction={handleDeleteTransaction} exchangeRate={exchangeRate} />}
           {activeView === 'custody' && <CustodyManagement transactions={transactions} accounts={accounts} onAddTransaction={handleAddTransaction} onDeleteTransaction={handleDeleteTransaction} exchangeRate={exchangeRate} />}
-          {activeView === 'budget' && <BudgetView budgets={budgets} transactions={transactions} onAdd={() => {}} onDelete={() => {}} exchangeRate={exchangeRate} selectedMonth={selectedMonth} expenseCategories={DEFAULT_EXPENSE_CATEGORIES} />}
+          {/* AQUÍ ESTÁ LA MAGIA PARA QUE NO SALTE: onAdd llama a refreshData */}
+          {activeView === 'budget' && <BudgetView budgets={budgets} transactions={transactions} onAdd={refreshData} onDelete={refreshData} exchangeRate={exchangeRate} selectedMonth={selectedMonth} expenseCategories={DEFAULT_EXPENSE_CATEGORIES} />}
           {activeView === 'settings' && <CategorySettings expenseCategories={DEFAULT_EXPENSE_CATEGORIES} incomeCategories={DEFAULT_INCOME_CATEGORIES} onUpdate={() => {}} />}
         </div>
       </main>
