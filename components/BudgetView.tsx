@@ -7,8 +7,8 @@ import { ConfirmationModal } from './ConfirmationModal';
 interface Props {
   budgets: Budget[];
   transactions: Transaction[];
-  onAdd: () => void;
-  onDelete: () => void;
+  onAdd: () => void;    // Esta función recarga los datos suavemente
+  onDelete: () => void; // Esta también
   exchangeRate: number;
   selectedMonth: string;
   expenseCategories: string[];
@@ -77,7 +77,8 @@ export const BudgetView: React.FC<Props> = ({
     });
     setEditingId(budget.id);
     setShowForm(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Scroll suave al formulario
+    document.querySelector('form')?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const handleCancel = () => {
@@ -98,7 +99,6 @@ export const BudgetView: React.FC<Props> = ({
     }
 
     const payload = {
-        user_id: user.id,
         category: newBudget.category,
         limit: newBudget.limit,
         month: targetMonth,
@@ -107,9 +107,11 @@ export const BudgetView: React.FC<Props> = ({
 
     let error;
     if (editingId) {
+        // ACTUALIZAR (Requiere el permiso del Paso 1)
         const result = await supabase.from('budgets').update(payload).eq('id', editingId);
         error = result.error;
     } else {
+        // CREAR
         const { data: existing } = await supabase.from('budgets')
             .select('id').eq('user_id', user.id).eq('category', newBudget.category).eq('month', targetMonth).single();
         
@@ -117,7 +119,7 @@ export const BudgetView: React.FC<Props> = ({
              const result = await supabase.from('budgets').update(payload).eq('id', existing.id);
              error = result.error;
         } else {
-             const result = await supabase.from('budgets').insert([payload]);
+             const result = await supabase.from('budgets').insert([{...payload, user_id: user.id}]);
              error = result.error;
         }
     }
@@ -126,8 +128,7 @@ export const BudgetView: React.FC<Props> = ({
         alert("Error: " + error.message);
     } else {
         handleCancel();
-        onAdd(); 
-        setTimeout(() => window.location.reload(), 500); 
+        onAdd(); // Refresca los datos SIN recargar la página
     }
   };
 
@@ -139,9 +140,8 @@ export const BudgetView: React.FC<Props> = ({
         onConfirm: async () => {
             const { error } = await supabase.from('budgets').delete().eq('id', id);
             if (!error) {
-                onDelete();
+                onDelete(); // Refresca los datos SIN recargar la página
                 setConfirmModal(prev => ({ ...prev, isOpen: false }));
-                setTimeout(() => window.location.reload(), 500);
             }
         }
     });
@@ -274,7 +274,6 @@ export const BudgetView: React.FC<Props> = ({
           const percentage = Math.min((spent / (limit || 1)) * 100, 100);
           const isOver = spent > limit;
           const isWarning = percentage >= 80 && !isOver;
-          const isHistorical = b.month !== selectedMonth;
           
           return (
             <div key={b.id} className={`bg-white p-8 rounded-[2.5rem] border ${isOver ? 'border-rose-100' : 'border-slate-100'} shadow-sm relative overflow-hidden group transition-all hover:shadow-xl`}>
@@ -282,16 +281,12 @@ export const BudgetView: React.FC<Props> = ({
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-lg font-black text-slate-900">{b.category}</h3>
-                    {isHistorical && (
-                      <span className="text-[8px] font-black bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full uppercase tracking-tighter" title="Mes pasado">Fijo</span>
-                    )}
                   </div>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
                     Tope: {b.currency === 'USD' ? '$' : 'Bs '}{limit.toLocaleString()}
                   </p>
                 </div>
                 
-                {/* SOLUCIÓN: Botones siempre visibles y el ícono de alerta NO los tapa */}
                 <div className="flex items-center gap-2">
                     {isOver && (
                        <div title="Presupuesto excedido" className="p-2 bg-rose-50 text-rose-500 rounded-xl animate-pulse">
