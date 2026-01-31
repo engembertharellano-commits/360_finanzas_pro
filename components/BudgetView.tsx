@@ -19,8 +19,6 @@ export const BudgetView: React.FC<Props> = ({
 }) => {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  
-  // Estado para el modal de advertencia
   const [confirmModal, setConfirmModal] = useState({ 
     isOpen: false, title: '', message: '', onConfirm: async () => {} 
   });
@@ -31,38 +29,26 @@ export const BudgetView: React.FC<Props> = ({
     currency: 'USD' as Currency
   });
 
-  // Efecto para poner una categoría por defecto si no estamos editando
   useEffect(() => {
     if (!editingId && expenseCategories.length > 0 && !expenseCategories.includes(newBudget.category)) {
       setNewBudget(prev => ({ ...prev, category: expenseCategories[0] }));
     }
   }, [expenseCategories, newBudget.category, editingId]);
 
-  // --- LÓGICA DE CÁLCULO MEJORADA ---
-  // Mostramos TODOS los presupuestos que coincidan con el mes seleccionado
-  // O que sean "heredados" si no hay uno específico para este mes.
   const activeBudgets = useMemo(() => {
     const categories = Array.from(new Set(budgets.map(b => b.category)));
-    
     return categories.map(cat => {
-      // 1. Buscamos si hay un presupuesto específico para ESTE mes
       const currentMonthBudget = budgets.find(b => b.category === cat && b.month === selectedMonth);
       if (currentMonthBudget) return currentMonthBudget;
-
-      // 2. Si no, buscamos el último configurado en el pasado
       const pastBudgets = budgets
         .filter(b => b.category === cat && b.month < selectedMonth)
-        .sort((a, b) => b.month.localeCompare(a.month)); // Ordenamos por fecha descendente
-      
-      // Retornamos el más reciente (o undefined si no hay)
+        .sort((a, b) => b.month.localeCompare(a.month));
       return pastBudgets[0];
     }).filter(Boolean) as Budget[];
   }, [budgets, selectedMonth]);
 
   const budgetsWithSpent = useMemo(() => {
-    // Filtramos gastos del mes seleccionado
     const monthTransactions = transactions.filter(t => t.date.startsWith(selectedMonth) && (t.type === 'Gasto' || t.type === 'expense'));
-    
     return activeBudgets.map(b => {
       const spent = monthTransactions
         .filter(t => t.category === b.category)
@@ -82,22 +68,21 @@ export const BudgetView: React.FC<Props> = ({
     return { totalUSD, totalVES, totalSpentUSD, totalSpentVES };
   }, [budgetsWithSpent]);
 
-  // --- LÓGICA DE EDICIÓN ---
+  // --- ACCIONES ---
   const handleEdit = (budget: Budget) => {
     setNewBudget({
         category: budget.category,
         limit: budget.limit,
         currency: budget.currency
     });
-    setEditingId(budget.id); 
-    setShowForm(true); 
+    setEditingId(budget.id);
+    setShowForm(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleCancel = () => {
     setShowForm(false);
     setEditingId(null);
-    // Resetear formulario
     setNewBudget({ category: expenseCategories[0] || '', limit: 0, currency: 'USD' });
   };
 
@@ -106,9 +91,6 @@ export const BudgetView: React.FC<Props> = ({
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Detectar el mes correcto:
-    // Si estamos editando, MANTENEMOS el mes original del presupuesto (para no duplicarlo en otro mes)
-    // Si es nuevo, usamos el mes seleccionado.
     let targetMonth = selectedMonth;
     if (editingId) {
         const originalBudget = budgets.find(b => b.id === editingId);
@@ -119,34 +101,24 @@ export const BudgetView: React.FC<Props> = ({
         user_id: user.id,
         category: newBudget.category,
         limit: newBudget.limit,
-        month: targetMonth, 
+        month: targetMonth,
         currency: newBudget.currency
     };
 
     let error;
-
     if (editingId) {
-        // ACTUALIZAR
         const result = await supabase.from('budgets').update(payload).eq('id', editingId);
         error = result.error;
     } else {
-        // CREAR NUEVO
-        // Primero verificamos si ya existe uno para esa categoría en ese mes para evitar duplicados
         const { data: existing } = await supabase.from('budgets')
-            .select('id')
-            .eq('user_id', user.id)
-            .eq('category', newBudget.category)
-            .eq('month', targetMonth)
-            .single();
-
+            .select('id').eq('user_id', user.id).eq('category', newBudget.category).eq('month', targetMonth).single();
+        
         if (existing) {
-            // Si existe, lo actualizamos en vez de crear otro
-            const result = await supabase.from('budgets').update(payload).eq('id', existing.id);
-            error = result.error;
+             const result = await supabase.from('budgets').update(payload).eq('id', existing.id);
+             error = result.error;
         } else {
-            // Si no existe, insertamos
-            const result = await supabase.from('budgets').insert([payload]);
-            error = result.error;
+             const result = await supabase.from('budgets').insert([payload]);
+             error = result.error;
         }
     }
 
@@ -154,21 +126,22 @@ export const BudgetView: React.FC<Props> = ({
         alert("Error: " + error.message);
     } else {
         handleCancel();
-        onAdd(); // Refrescar datos globales
+        onAdd(); 
+        setTimeout(() => window.location.reload(), 500); 
     }
   };
 
-  // --- LÓGICA DE ELIMINACIÓN ---
   const requestDelete = (id: string) => {
     setConfirmModal({
         isOpen: true,
         title: '¿Eliminar Presupuesto?',
-        message: 'Se eliminará este límite. Si tienes otro presupuesto antiguo para esta categoría, podría aparecer en su lugar.',
+        message: 'Se eliminará este límite definitivamente.',
         onConfirm: async () => {
             const { error } = await supabase.from('budgets').delete().eq('id', id);
             if (!error) {
                 onDelete();
                 setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                setTimeout(() => window.location.reload(), 500);
             }
         }
     });
@@ -260,7 +233,7 @@ export const BudgetView: React.FC<Props> = ({
                 className="w-full px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-900"
                 value={newBudget.category}
                 onChange={e => setNewBudget({...newBudget, category: e.target.value})}
-                disabled={!!editingId} 
+                disabled={!!editingId}
               >
                 {expenseCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
               </select>
@@ -301,9 +274,7 @@ export const BudgetView: React.FC<Props> = ({
           const percentage = Math.min((spent / (limit || 1)) * 100, 100);
           const isOver = spent > limit;
           const isWarning = percentage >= 80 && !isOver;
-          
-          // HEMOS ELIMINADO LA RESTRICCIÓN isHistorical PARA LOS BOTONES
-          const isHistorical = b.month !== selectedMonth; 
+          const isHistorical = b.month !== selectedMonth;
           
           return (
             <div key={b.id} className={`bg-white p-8 rounded-[2.5rem] border ${isOver ? 'border-rose-100' : 'border-slate-100'} shadow-sm relative overflow-hidden group transition-all hover:shadow-xl`}>
@@ -312,7 +283,7 @@ export const BudgetView: React.FC<Props> = ({
                   <div className="flex items-center gap-2">
                     <h3 className="text-lg font-black text-slate-900">{b.category}</h3>
                     {isHistorical && (
-                      <span className="text-[8px] font-black bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full uppercase tracking-tighter" title="Este presupuesto es de un mes anterior">Histórico</span>
+                      <span className="text-[8px] font-black bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full uppercase tracking-tighter" title="Mes pasado">Fijo</span>
                     )}
                   </div>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
@@ -320,13 +291,18 @@ export const BudgetView: React.FC<Props> = ({
                   </p>
                 </div>
                 
-                {/* AHORA LOS BOTONES SE MUESTRAN SIEMPRE, PARA QUE PUEDAS BORRAR LO QUE QUIERAS */}
-                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                    <button onClick={() => handleEdit(b)} className="p-2 text-slate-300 hover:text-indigo-500 bg-slate-50 rounded-xl" title="Editar">
-                        <Pencil size={16} />
+                {/* SOLUCIÓN: Botones siempre visibles y el ícono de alerta NO los tapa */}
+                <div className="flex items-center gap-2">
+                    {isOver && (
+                       <div title="Presupuesto excedido" className="p-2 bg-rose-50 text-rose-500 rounded-xl animate-pulse">
+                          <AlertCircle size={18} />
+                       </div>
+                    )}
+                    <button onClick={() => handleEdit(b)} className="p-2 text-slate-400 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 rounded-xl transition-colors" title="Editar">
+                        <Pencil size={18} />
                     </button>
-                    <button onClick={() => requestDelete(b.id)} className="p-2 text-slate-300 hover:text-rose-500 bg-slate-50 rounded-xl" title="Eliminar">
-                        <Trash2 size={16} />
+                    <button onClick={() => requestDelete(b.id)} className="p-2 text-slate-400 hover:text-rose-600 bg-slate-100 hover:bg-rose-50 rounded-xl transition-colors" title="Eliminar">
+                        <Trash2 size={18} />
                     </button>
                 </div>
               </div>
@@ -359,12 +335,6 @@ export const BudgetView: React.FC<Props> = ({
                   </span>
                 </div>
               </div>
-
-              {isOver && (
-                <div className="absolute top-6 right-6 p-2 bg-rose-50 rounded-full">
-                  <AlertCircle className="text-rose-600" size={18} />
-                </div>
-              )}
             </div>
           );
         })}
