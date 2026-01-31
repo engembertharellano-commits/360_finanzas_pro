@@ -1,13 +1,14 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Budget, Currency, Transaction } from '../types';
-import { Plus, PieChart, AlertCircle, Trash2, Wallet, TrendingUp, ChevronRight } from 'lucide-react';
+import { Plus, PieChart, AlertCircle, Trash2, Wallet, TrendingUp, ChevronRight, Pencil, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { ConfirmationModal } from './ConfirmationModal'; // Importamos tu modal bonito
 
 interface Props {
   budgets: Budget[];
   transactions: Transaction[];
-  onAdd: () => void;    // Simplificado para solo avisar
-  onDelete: () => void; // Simplificado para solo avisar
+  onAdd: () => void;
+  onDelete: () => void;
   exchangeRate: number;
   selectedMonth: string;
   expenseCategories: string[];
@@ -17,6 +18,16 @@ export const BudgetView: React.FC<Props> = ({
   budgets, transactions, onAdd, onDelete, exchangeRate, selectedMonth, expenseCategories 
 }) => {
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null); // Para saber si estamos editando
+  
+  // Estado para el modal de advertencia
+  const [confirmModal, setConfirmModal] = useState({ 
+    isOpen: false, 
+    title: '', 
+    message: '', 
+    onConfirm: async () => {} 
+  });
+
   const [newBudget, setNewBudget] = useState({
     category: expenseCategories[0] || '',
     limit: 0,
@@ -24,10 +35,11 @@ export const BudgetView: React.FC<Props> = ({
   });
 
   useEffect(() => {
-    if (expenseCategories.length > 0 && !expenseCategories.includes(newBudget.category)) {
+    // Solo reseteamos si NO estamos editando y la categoría es inválida
+    if (!editingId && expenseCategories.length > 0 && !expenseCategories.includes(newBudget.category)) {
       setNewBudget(prev => ({ ...prev, category: expenseCategories[0] }));
     }
-  }, [expenseCategories, newBudget.category]);
+  }, [expenseCategories, newBudget.category, editingId]);
 
   const activeBudgets = useMemo(() => {
     const categories = Array.from(new Set(budgets.map(b => b.category)));
@@ -62,7 +74,26 @@ export const BudgetView: React.FC<Props> = ({
     return { totalUSD, totalVES, totalSpentUSD, totalSpentVES };
   }, [budgetsWithSpent]);
 
-  // --- LÓGICA SIN SALTOS ---
+  // --- LÓGICA DE EDICIÓN ---
+  const handleEdit = (budget: Budget) => {
+    setNewBudget({
+        category: budget.category,
+        limit: budget.limit,
+        currency: budget.currency
+    });
+    setEditingId(budget.id); // Marcamos que estamos editando este ID
+    setShowForm(true); // Abrimos formulario
+    
+    // Scroll suave hacia el formulario
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancel = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setNewBudget({ category: expenseCategories[0] || '', limit: 0, currency: 'USD' });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const { data: { user } } = await supabase.auth.getUser();
@@ -76,22 +107,40 @@ export const BudgetView: React.FC<Props> = ({
         currency: newBudget.currency
     };
 
-    const { error } = await supabase.from('budgets').insert([payload]);
+    let error;
+
+    if (editingId) {
+        // MODO EDICIÓN: Actualizamos
+        const result = await supabase.from('budgets').update(payload).eq('id', editingId);
+        error = result.error;
+    } else {
+        // MODO CREACIÓN: Insertamos
+        const result = await supabase.from('budgets').insert([payload]);
+        error = result.error;
+    }
 
     if (error) {
         alert("Error: " + error.message);
     } else {
-        setShowForm(false);
-        setNewBudget({ category: expenseCategories[0] || '', limit: 0, currency: 'USD' });
-        // ¡MAGIA! Llamamos a onAdd() en lugar de recargar la página
-        onAdd(); 
+        handleCancel(); // Reseteamos y cerramos
+        onAdd(); // Refrescamos datos
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("¿Borrar este presupuesto?")) return;
-    const { error } = await supabase.from('budgets').delete().eq('id', id);
-    if (!error) onDelete(); // Recarga suave
+  // --- LÓGICA DE ELIMINACIÓN CON MODAL ---
+  const requestDelete = (id: string) => {
+    setConfirmModal({
+        isOpen: true,
+        title: '¿Eliminar Presupuesto?',
+        message: 'Se eliminará este límite de gastos. Tus movimientos históricos no se verán afectados.',
+        onConfirm: async () => {
+            const { error } = await supabase.from('budgets').delete().eq('id', id);
+            if (!error) {
+                onDelete(); // Refrescamos datos
+                setConfirmModal(prev => ({ ...prev, isOpen: false })); // Cerramos modal
+            }
+        }
+    });
   };
 
   const [year, month] = selectedMonth.split('-').map(Number);
@@ -99,6 +148,16 @@ export const BudgetView: React.FC<Props> = ({
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
+      
+      {/* MODAL DE ADVERTENCIA */}
+      <ConfirmationModal 
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        onConfirm={confirmModal.onConfirm}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+      />
+
       <section className="bg-white rounded-[3rem] p-8 border border-slate-100 shadow-sm overflow-hidden relative">
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-end gap-6">
           <div className="space-y-4">
@@ -107,7 +166,6 @@ export const BudgetView: React.FC<Props> = ({
                  <PieChart size={24} />
                </div>
                <div>
-                 {/* NOMBRE CAMBIADO */}
                  <h2 className="text-2xl font-black text-slate-900 leading-none">Presupuesto Global</h2>
                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Planificación para {monthName}</p>
                </div>
@@ -136,11 +194,15 @@ export const BudgetView: React.FC<Props> = ({
                 </div>
              </div>
           </div>
+          
           <button 
-            onClick={() => setShowForm(!showForm)}
-            className="w-full md:w-auto bg-slate-900 text-white px-8 py-4 rounded-2xl font-black hover:bg-slate-800 transition-all flex items-center justify-center gap-3 shadow-xl"
+            onClick={() => {
+                if(showForm) handleCancel();
+                else setShowForm(true);
+            }}
+            className={`w-full md:w-auto px-8 py-4 rounded-2xl font-black transition-all flex items-center justify-center gap-3 shadow-xl ${showForm ? 'bg-slate-100 text-slate-500' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
           >
-            <Plus size={20} /> {showForm ? 'Cerrar' : 'Nuevo Presupuesto'}
+            {showForm ? <><X size={20}/> Cancelar</> : <><Plus size={20}/> {editingId ? 'Editar Presupuesto' : 'Nuevo Presupuesto'}</>}
           </button>
         </div>
         <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
@@ -149,10 +211,17 @@ export const BudgetView: React.FC<Props> = ({
       </section>
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="bg-white p-8 rounded-[2.5rem] border border-indigo-100 shadow-2xl animate-in zoom-in duration-300">
+        <form onSubmit={handleSubmit} className="bg-white p-8 rounded-[2.5rem] border border-indigo-100 shadow-2xl animate-in zoom-in duration-300 relative">
+          {editingId && (
+              <div className="absolute top-6 right-8 bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider">
+                  Modo Edición
+              </div>
+          )}
           <div className="flex items-center gap-2 mb-6 text-indigo-600">
              <TrendingUp size={18} />
-             <h3 className="font-black uppercase text-xs tracking-widest">Definir Presupuesto - {monthName}</h3>
+             <h3 className="font-black uppercase text-xs tracking-widest">
+                 {editingId ? 'Editar Límite Existente' : `Definir Nuevo Límite - ${monthName}`}
+             </h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
             <div className="space-y-2">
@@ -161,6 +230,7 @@ export const BudgetView: React.FC<Props> = ({
                 className="w-full px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-900"
                 value={newBudget.category}
                 onChange={e => setNewBudget({...newBudget, category: e.target.value})}
+                disabled={!!editingId} // Bloqueamos cambio de categoría al editar para evitar duplicados
               >
                 {expenseCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
               </select>
@@ -188,7 +258,7 @@ export const BudgetView: React.FC<Props> = ({
               </div>
             </div>
             <button type="submit" className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black hover:bg-indigo-700 shadow-lg shadow-indigo-100 flex items-center justify-center gap-2">
-              Guardar <ChevronRight size={18} />
+              {editingId ? 'Actualizar' : 'Guardar'} <ChevronRight size={18} />
             </button>
           </div>
         </form>
@@ -217,10 +287,18 @@ export const BudgetView: React.FC<Props> = ({
                     Tope: {b.currency === 'USD' ? '$' : 'Bs '}{limit.toLocaleString()}
                   </p>
                 </div>
+                
                 {!isHistorical && (
-                  <button onClick={() => handleDelete(b.id)} className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-rose-500 transition-all bg-slate-50 rounded-xl">
-                    <Trash2 size={16} />
-                  </button>
+                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                      {/* BOTÓN EDITAR */}
+                      <button onClick={() => handleEdit(b)} className="p-2 text-slate-300 hover:text-indigo-500 bg-slate-50 rounded-xl" title="Editar">
+                        <Pencil size={16} />
+                      </button>
+                      {/* BOTÓN ELIMINAR */}
+                      <button onClick={() => requestDelete(b.id)} className="p-2 text-slate-300 hover:text-rose-500 bg-slate-50 rounded-xl" title="Eliminar">
+                        <Trash2 size={16} />
+                      </button>
+                  </div>
                 )}
               </div>
 
