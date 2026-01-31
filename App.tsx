@@ -8,7 +8,7 @@ import {
 } from './types';
 import { supabase } from './lib/supabase';
 
-// --- IMPORTACIÓN DE TODOS LOS COMPONENTES ---
+// --- COMPONENTES ---
 import { Dashboard } from './components/Dashboard';
 import { AccountsList } from './components/AccountsList';
 import { TransactionsLog } from './components/TransactionsLog';
@@ -23,7 +23,6 @@ import { CustodyManagement } from './components/CustodyManagement';
 import { Auth } from './components/Auth';
 
 const App: React.FC = () => {
-  // --- ESTADOS ---
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -40,7 +39,6 @@ const App: React.FC = () => {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => {} });
 
-  // --- CARGA DE DATOS ---
   const loadAppData = useCallback(async (userId: string) => {
     const [accs, trans, invs, buds] = await Promise.all([
       supabase.from('accounts').select('*').eq('user_id', userId),
@@ -65,7 +63,7 @@ const App: React.FC = () => {
     });
   }, [loadAppData]);
 
-  // --- FUNCIONES DE GUARDADO (Corregidas para evitar errores de schema) ---
+  // --- FUNCIONES DE GUARDADO ---
   
   const handleAddTransaction = async (tData: any) => {
     if (!currentUser) return;
@@ -84,25 +82,29 @@ const App: React.FC = () => {
 
   const handleAddInvestment = async (invData: any) => {
     if (!currentUser) return;
-    
-    // Mapeo seguro para evitar error de 'currentMarketPrice'
-    const cleanInv = {
+
+    // TRUCO MAESTRO: Enviamos los datos duplicados con ambos nombres
+    // para asegurarnos de que la base de datos los reciba sí o sí.
+    const safeInvestment = {
       ...invData,
       user_id: currentUser.id,
-      // Aseguramos que se guarden números válidos
+      // Nombres camelCase (Javascript)
       buyPrice: Number(invData.buyPrice) || 0,
       buyCommission: Number(invData.buyCommission) || 0,
+      currentPrice: Number(invData.currentPrice) || 0,
       quantity: Number(invData.quantity) || 0,
-      currentMarketPrice: Number(invData.currentPrice || invData.currentMarketPrice || 0), // Cubre ambos casos
-      currentPrice: Number(invData.currentPrice || 0)
+      // Nombres snake_case (Base de Datos) - ESTO SOLUCIONA EL ERROR
+      buy_price: Number(invData.buyPrice) || 0,
+      buy_commission: Number(invData.buyCommission) || 0,
+      current_price: Number(invData.currentPrice) || 0,
     };
 
-    const { error } = await supabase.from('investments').insert([cleanInv]);
+    const { error } = await supabase.from('investments').insert([safeInvestment]);
     
     if (error) {
-        alert("Error en Portafolio: " + error.message);
+        alert("⚠️ Error: " + error.message);
     } else {
-        alert("✅ Inversión registrada con éxito");
+        alert("✅ Activo guardado correctamente");
         loadAppData(currentUser.id);
     }
   };
@@ -115,12 +117,11 @@ const App: React.FC = () => {
   };
 
   // --- FUNCIONES DE ELIMINADO ---
-
   const handleDeleteTransaction = (id: string) => {
     setConfirmModal({
       isOpen: true,
       title: '¿Eliminar registro?',
-      message: 'El saldo se revertirá automáticamente en tus cuentas.',
+      message: 'El saldo se revertirá automáticamente.',
       onConfirm: async () => {
         await supabase.from('transactions').delete().eq('id', id);
         loadAppData(currentUser!.id);
@@ -133,7 +134,7 @@ const App: React.FC = () => {
     setConfirmModal({
       isOpen: true,
       title: '¿Eliminar inversión?',
-      message: 'Se quitará este activo de tu portafolio.',
+      message: 'Se quitará del portafolio.',
       onConfirm: async () => {
         await supabase.from('investments').delete().eq('id', id);
         loadAppData(currentUser!.id);
@@ -146,7 +147,7 @@ const App: React.FC = () => {
     setConfirmModal({
       isOpen: true,
       title: '¿Eliminar cuenta?',
-      message: 'Se borrará todo el historial y saldo de esta cuenta.',
+      message: 'Se borrará todo el historial.',
       onConfirm: async () => {
         await supabase.from('accounts').delete().eq('id', id);
         loadAppData(currentUser!.id);
@@ -174,8 +175,7 @@ const App: React.FC = () => {
         <div className="flex items-center space-x-3 mb-10 text-2xl font-black uppercase italic tracking-tighter">
           <Sparkles className="w-8 h-8" /> <span>Finanza360</span>
         </div>
-        
-        <nav className="space-y-1 flex-1 overflow-y-auto custom-scrollbar">
+        <nav className="space-y-1 flex-1 overflow-y-auto">
           <NavItem active={activeView === 'dashboard'} onClick={() => {setActiveView('dashboard'); setIsMobileMenuOpen(false);}} icon={<LayoutDashboard size={20}/>} label="Principal" />
           <NavItem active={activeView === 'ai'} onClick={() => {setActiveView('ai'); setIsMobileMenuOpen(false);}} icon={<Sparkles size={20}/>} label="Análisis IA" isSpecial />
           <div className="h-px bg-slate-100 my-4"></div>
@@ -188,7 +188,6 @@ const App: React.FC = () => {
           <NavItem active={activeView === 'budget'} onClick={() => {setActiveView('budget'); setIsMobileMenuOpen(false);}} icon={<PieChart size={20}/>} label="Límites" />
           <NavItem active={activeView === 'settings'} onClick={() => {setActiveView('settings'); setIsMobileMenuOpen(false);}} icon={<Settings2 size={20}/>} label="Ajustes" />
         </nav>
-
         <button onClick={handleLogout} className="mt-8 flex items-center justify-center gap-2 text-slate-300 text-[10px] font-black uppercase hover:text-rose-500 transition-colors">
           <LogOut size={14} /> Cerrar Sesión
         </button>
@@ -198,7 +197,7 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto">
           {activeView === 'dashboard' && <Dashboard accounts={accounts} transactions={transactions} investments={investments} budgets={budgets} selectedMonth={selectedMonth} exchangeRate={exchangeRate} onSyncRate={() => {}} isSyncingRate={false} />}
           {activeView === 'ai' && <AIInsights transactions={transactions} accounts={accounts} investments={investments} selectedMonth={selectedMonth} exchangeRate={exchangeRate} />}
-          {activeView === 'accounts' && <AccountsList accounts={accounts} onAdd={handleAddAccount} onDelete={() => {}} />}
+          {activeView === 'accounts' && <AccountsList accounts={accounts} onAdd={handleAddAccount} onDelete={handleDeleteAccount} />}
           {activeView === 'transactions' && <TransactionsLog transactions={transactions} accounts={accounts} onAdd={handleAddTransaction} onDelete={handleDeleteTransaction} selectedMonth={selectedMonth} exchangeRate={exchangeRate} expenseCategories={DEFAULT_EXPENSE_CATEGORIES} incomeCategories={DEFAULT_INCOME_CATEGORIES} />}
           {activeView === 'portfolio' && <Portfolio investments={investments} accounts={accounts} onAdd={handleAddInvestment} onUpdate={() => {}} onDelete={handleDeleteInvestment} onAddTransaction={handleAddTransaction} exchangeRate={exchangeRate} />}
           {activeView === 'work' && <WorkManagement transactions={transactions} onUpdateTransaction={() => {}} onDeleteTransaction={handleDeleteTransaction} exchangeRate={exchangeRate} />}
