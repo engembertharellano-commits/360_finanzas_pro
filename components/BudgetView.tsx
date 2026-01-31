@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Budget, Currency, Transaction } from '../types';
 import { Plus, PieChart, AlertCircle, Trash2, Wallet, TrendingUp, ChevronRight, Pencil, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { ConfirmationModal } from './ConfirmationModal'; // Importamos tu modal bonito
+import { ConfirmationModal } from './ConfirmationModal';
 
 interface Props {
   budgets: Budget[];
@@ -18,14 +18,11 @@ export const BudgetView: React.FC<Props> = ({
   budgets, transactions, onAdd, onDelete, exchangeRate, selectedMonth, expenseCategories 
 }) => {
   const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null); // Para saber si estamos editando
+  const [editingId, setEditingId] = useState<string | null>(null);
   
   // Estado para el modal de advertencia
   const [confirmModal, setConfirmModal] = useState({ 
-    isOpen: false, 
-    title: '', 
-    message: '', 
-    onConfirm: async () => {} 
+    isOpen: false, title: '', message: '', onConfirm: async () => {} 
   });
 
   const [newBudget, setNewBudget] = useState({
@@ -34,27 +31,38 @@ export const BudgetView: React.FC<Props> = ({
     currency: 'USD' as Currency
   });
 
+  // Efecto para poner una categoría por defecto si no estamos editando
   useEffect(() => {
-    // Solo reseteamos si NO estamos editando y la categoría es inválida
     if (!editingId && expenseCategories.length > 0 && !expenseCategories.includes(newBudget.category)) {
       setNewBudget(prev => ({ ...prev, category: expenseCategories[0] }));
     }
   }, [expenseCategories, newBudget.category, editingId]);
 
+  // --- LÓGICA DE CÁLCULO MEJORADA ---
+  // Mostramos TODOS los presupuestos que coincidan con el mes seleccionado
+  // O que sean "heredados" si no hay uno específico para este mes.
   const activeBudgets = useMemo(() => {
     const categories = Array.from(new Set(budgets.map(b => b.category)));
+    
     return categories.map(cat => {
+      // 1. Buscamos si hay un presupuesto específico para ESTE mes
       const currentMonthBudget = budgets.find(b => b.category === cat && b.month === selectedMonth);
       if (currentMonthBudget) return currentMonthBudget;
+
+      // 2. Si no, buscamos el último configurado en el pasado
       const pastBudgets = budgets
         .filter(b => b.category === cat && b.month < selectedMonth)
-        .sort((a, b) => b.month.localeCompare(a.month));
+        .sort((a, b) => b.month.localeCompare(a.month)); // Ordenamos por fecha descendente
+      
+      // Retornamos el más reciente (o undefined si no hay)
       return pastBudgets[0];
     }).filter(Boolean) as Budget[];
   }, [budgets, selectedMonth]);
 
   const budgetsWithSpent = useMemo(() => {
+    // Filtramos gastos del mes seleccionado
     const monthTransactions = transactions.filter(t => t.date.startsWith(selectedMonth) && (t.type === 'Gasto' || t.type === 'expense'));
+    
     return activeBudgets.map(b => {
       const spent = monthTransactions
         .filter(t => t.category === b.category)
@@ -81,16 +89,15 @@ export const BudgetView: React.FC<Props> = ({
         limit: budget.limit,
         currency: budget.currency
     });
-    setEditingId(budget.id); // Marcamos que estamos editando este ID
-    setShowForm(true); // Abrimos formulario
-    
-    // Scroll suave hacia el formulario
+    setEditingId(budget.id); 
+    setShowForm(true); 
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleCancel = () => {
     setShowForm(false);
     setEditingId(null);
+    // Resetear formulario
     setNewBudget({ category: expenseCategories[0] || '', limit: 0, currency: 'USD' });
   };
 
@@ -99,45 +106,69 @@ export const BudgetView: React.FC<Props> = ({
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
+    // Detectar el mes correcto:
+    // Si estamos editando, MANTENEMOS el mes original del presupuesto (para no duplicarlo en otro mes)
+    // Si es nuevo, usamos el mes seleccionado.
+    let targetMonth = selectedMonth;
+    if (editingId) {
+        const originalBudget = budgets.find(b => b.id === editingId);
+        if (originalBudget) targetMonth = originalBudget.month;
+    }
+
     const payload = {
         user_id: user.id,
         category: newBudget.category,
         limit: newBudget.limit,
-        month: selectedMonth,
+        month: targetMonth, 
         currency: newBudget.currency
     };
 
     let error;
 
     if (editingId) {
-        // MODO EDICIÓN: Actualizamos
+        // ACTUALIZAR
         const result = await supabase.from('budgets').update(payload).eq('id', editingId);
         error = result.error;
     } else {
-        // MODO CREACIÓN: Insertamos
-        const result = await supabase.from('budgets').insert([payload]);
-        error = result.error;
+        // CREAR NUEVO
+        // Primero verificamos si ya existe uno para esa categoría en ese mes para evitar duplicados
+        const { data: existing } = await supabase.from('budgets')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('category', newBudget.category)
+            .eq('month', targetMonth)
+            .single();
+
+        if (existing) {
+            // Si existe, lo actualizamos en vez de crear otro
+            const result = await supabase.from('budgets').update(payload).eq('id', existing.id);
+            error = result.error;
+        } else {
+            // Si no existe, insertamos
+            const result = await supabase.from('budgets').insert([payload]);
+            error = result.error;
+        }
     }
 
     if (error) {
         alert("Error: " + error.message);
     } else {
-        handleCancel(); // Reseteamos y cerramos
-        onAdd(); // Refrescamos datos
+        handleCancel();
+        onAdd(); // Refrescar datos globales
     }
   };
 
-  // --- LÓGICA DE ELIMINACIÓN CON MODAL ---
+  // --- LÓGICA DE ELIMINACIÓN ---
   const requestDelete = (id: string) => {
     setConfirmModal({
         isOpen: true,
         title: '¿Eliminar Presupuesto?',
-        message: 'Se eliminará este límite de gastos. Tus movimientos históricos no se verán afectados.',
+        message: 'Se eliminará este límite. Si tienes otro presupuesto antiguo para esta categoría, podría aparecer en su lugar.',
         onConfirm: async () => {
             const { error } = await supabase.from('budgets').delete().eq('id', id);
             if (!error) {
-                onDelete(); // Refrescamos datos
-                setConfirmModal(prev => ({ ...prev, isOpen: false })); // Cerramos modal
+                onDelete();
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
             }
         }
     });
@@ -149,7 +180,6 @@ export const BudgetView: React.FC<Props> = ({
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
       
-      {/* MODAL DE ADVERTENCIA */}
       <ConfirmationModal 
         isOpen={confirmModal.isOpen}
         title={confirmModal.title}
@@ -230,7 +260,7 @@ export const BudgetView: React.FC<Props> = ({
                 className="w-full px-6 py-4 rounded-2xl bg-slate-50 border-none outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-900"
                 value={newBudget.category}
                 onChange={e => setNewBudget({...newBudget, category: e.target.value})}
-                disabled={!!editingId} // Bloqueamos cambio de categoría al editar para evitar duplicados
+                disabled={!!editingId} 
               >
                 {expenseCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
               </select>
@@ -271,7 +301,9 @@ export const BudgetView: React.FC<Props> = ({
           const percentage = Math.min((spent / (limit || 1)) * 100, 100);
           const isOver = spent > limit;
           const isWarning = percentage >= 80 && !isOver;
-          const isHistorical = b.month !== selectedMonth;
+          
+          // HEMOS ELIMINADO LA RESTRICCIÓN isHistorical PARA LOS BOTONES
+          const isHistorical = b.month !== selectedMonth; 
           
           return (
             <div key={b.id} className={`bg-white p-8 rounded-[2.5rem] border ${isOver ? 'border-rose-100' : 'border-slate-100'} shadow-sm relative overflow-hidden group transition-all hover:shadow-xl`}>
@@ -280,7 +312,7 @@ export const BudgetView: React.FC<Props> = ({
                   <div className="flex items-center gap-2">
                     <h3 className="text-lg font-black text-slate-900">{b.category}</h3>
                     {isHistorical && (
-                      <span className="text-[8px] font-black bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full uppercase tracking-tighter" title="Mes pasado">Fijo</span>
+                      <span className="text-[8px] font-black bg-slate-100 text-slate-400 px-2 py-0.5 rounded-full uppercase tracking-tighter" title="Este presupuesto es de un mes anterior">Histórico</span>
                     )}
                   </div>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
@@ -288,18 +320,15 @@ export const BudgetView: React.FC<Props> = ({
                   </p>
                 </div>
                 
-                {!isHistorical && (
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                      {/* BOTÓN EDITAR */}
-                      <button onClick={() => handleEdit(b)} className="p-2 text-slate-300 hover:text-indigo-500 bg-slate-50 rounded-xl" title="Editar">
+                {/* AHORA LOS BOTONES SE MUESTRAN SIEMPRE, PARA QUE PUEDAS BORRAR LO QUE QUIERAS */}
+                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                    <button onClick={() => handleEdit(b)} className="p-2 text-slate-300 hover:text-indigo-500 bg-slate-50 rounded-xl" title="Editar">
                         <Pencil size={16} />
-                      </button>
-                      {/* BOTÓN ELIMINAR */}
-                      <button onClick={() => requestDelete(b.id)} className="p-2 text-slate-300 hover:text-rose-500 bg-slate-50 rounded-xl" title="Eliminar">
+                    </button>
+                    <button onClick={() => requestDelete(b.id)} className="p-2 text-slate-300 hover:text-rose-500 bg-slate-50 rounded-xl" title="Eliminar">
                         <Trash2 size={16} />
-                      </button>
-                  </div>
-                )}
+                    </button>
+                </div>
               </div>
 
               <div className="space-y-4">
